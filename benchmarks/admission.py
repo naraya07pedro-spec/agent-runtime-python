@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import httpx
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 
 from app.api import create_app
 from app.config import Settings
@@ -33,7 +34,12 @@ def percentile(values, fraction):
 
 
 async def run(count, concurrency, warmup):
+    database_url = os.environ.get("TEST_DATABASE_URL")
+    if not database_url or not (make_url(database_url).database or "").endswith("_test"):
+        raise SystemExit("benchmark requires TEST_DATABASE_URL pointing to a dedicated *_test DB")
     config = Settings(
+        _env_file=None,
+        database_url=database_url,
         api_key=secrets.token_urlsafe(32),
         approval_key=secrets.token_urlsafe(32),
         requests_per_minute=100000,
@@ -117,6 +123,7 @@ async def run(count, concurrency, warmup):
                 "p99_ms": percentile(durations, 0.99),
                 "requests_per_second": count / elapsed,
                 "errors": sum(failures.values()),
+                "successes": count - sum(failures.values()),
                 "failure_types": dict(failures),
                 "claim_query_plan": list(plan),
                 "production_capacity_claim": False,

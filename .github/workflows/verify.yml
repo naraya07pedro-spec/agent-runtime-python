@@ -40,6 +40,10 @@ jobs:
         with:
           version: '0.12.19'
           enable-cache: true
+      - name: Start with fresh generated evidence
+        run: |
+          rm -rf artifacts
+          mkdir artifacts
       - name: Locked dependencies
         run: uv sync --locked
       - name: Static quality
@@ -65,6 +69,8 @@ jobs:
       - name: Render evidence summaries
         if: always()
         run: uv run --locked python scripts/report.py
+      - name: Documentation link integrity
+        run: uv run --locked python scripts/check_docs.py
       - name: Dependency audit
         run: |
           uv export --locked --no-dev --no-emit-project --format requirements-txt > /tmp/runtime-requirements.txt
