@@ -8,7 +8,14 @@ from app.tables import Base
 
 
 def migrate(connection):
-    context.configure(connection=connection, target_metadata=Base.metadata, compare_type=True)
+    context.configure(
+        connection=connection,
+        target_metadata=Base.metadata,
+        compare_type=True,
+        include_object=lambda obj, name, kind, reflected, compare_to: (
+            name != "sandbox_external_effects"
+        ),
+    )
     with context.begin_transaction():
         context.run_migrations()
 

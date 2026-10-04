@@ -1,0 +1,55 @@
+x-runtime: &runtime
+  image: bounded-agent-runtime:local
+  env_file: .env
+  environment:
+    RUNTIME_DATABASE_URL: postgresql+asyncpg://runtime:runtime@db:5432/runtime
+  init: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: runtime
+      POSTGRES_PASSWORD: runtime
+      POSTGRES_DB: runtime
+    volumes: ["runtime-db:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U runtime -d runtime"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    <<: *runtime
+    command: ["alembic","upgrade","head"]
+    depends_on:
+      db: {condition: service_healthy}
+  sandbox:
+    <<: *runtime
+    command: ["uvicorn","app.sandbox:create_sandbox","--factory","--host","0.0.0.0","--port","8001","--no-access-log"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  api:
+    <<: *runtime
+    build: .
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      sandbox: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  worker:
+    <<: *runtime
+    command: ["python","-m","app.worker"]
+    depends_on:
+      api: {condition: service_healthy}
+volumes:
+  runtime-db:
