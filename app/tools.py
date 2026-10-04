@@ -6,7 +6,7 @@ from pydantic import Field, ValidationError
 
 from app.config import Settings
 from app.domain import JSON, Contract, Dispatch, ExternalFault, Fault, ReconcileResult, ToolResult
-from app.reliability import check_response
+from app.http_boundary import bounded_request
 
 
 class CustomerInput(Contract):
@@ -130,42 +130,44 @@ class HttpTools:
 
     async def execute(self, call: Dispatch) -> ToolResult:
         try:
-            response = await self.client.post(
+            raw = await bounded_request(
+                self.client,
+                "POST",
                 f"{self.settings.tool_base_url.rstrip('/')}/tools/{call.tool}",
                 headers={**self.headers(), "Idempotency-Key": call.operation_key},
-                json={
+                body={
                     "arguments": call.arguments,
                     "operation_key": call.operation_key,
                     "fingerprint": call.fingerprint,
                 },
-                timeout=self.settings.tool_timeout,
+                timeout_seconds=self.settings.tool_timeout,
             )
-            check_response(response)
-            result = ToolResult.model_validate_json(response.content)
+            result = ToolResult.model_validate_json(raw)
             if result.operation_key != call.operation_key or result.fingerprint != call.fingerprint:
                 raise ExternalFault("tool_result_identity_mismatch", ambiguous=True)
             return result
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+        except httpx.TransportError as exc:
             raise ExternalFault("tool_transport_uncertain", transient=True, ambiguous=True) from exc
         except (ValidationError, ValueError) as exc:
             raise ExternalFault("tool_response_invalid", ambiguous=True) from exc
 
     async def lookup(self, operation_key: str, action_fingerprint: str) -> ReconcileResult:
         try:
-            response = await self.client.get(
+            raw = await bounded_request(
+                self.client,
+                "GET",
                 f"{self.settings.tool_base_url.rstrip('/')}/operations/{operation_key}",
                 headers=self.headers(),
-                timeout=self.settings.tool_timeout,
+                timeout_seconds=self.settings.tool_timeout,
             )
-            check_response(response)
-            result = ReconcileResult.model_validate_json(response.content)
+            result = ReconcileResult.model_validate_json(raw)
             if result.result and (
                 result.result.operation_key != operation_key
                 or result.result.fingerprint != action_fingerprint
             ):
                 raise ExternalFault("reconciliation_identity_mismatch", ambiguous=True)
             return result
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+        except httpx.TransportError as exc:
             raise ExternalFault("reconciliation_transport", transient=True) from exc
         except (ValidationError, ValueError) as exc:
             raise ExternalFault("reconciliation_response_invalid", ambiguous=True) from exc
