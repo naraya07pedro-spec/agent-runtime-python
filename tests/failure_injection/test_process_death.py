@@ -83,3 +83,43 @@ async def test_real_process_exit_after_external_success(rig, database_url):
         if server.returncode is None:
             server.terminate()
         await server.communicate()
+
+
+async def test_real_process_exit_after_claim_can_be_reclaimed(rig, database_url):
+    from sqlalchemy import select
+
+    from app.domain import Fault, Lease
+    from app.tables import Execution
+
+    eid = await rig.create()
+    worker = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "tests.failure_injection.crash_worker",
+        str(eid),
+        "after_claim",
+        env={**os.environ, "RUNTIME_DATABASE_URL": database_url},
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        async with asyncio.timeout(15):
+            stdout, stderr = await worker.communicate()
+        assert worker.returncode == 74, (stdout.decode(), stderr.decode())
+    finally:
+        if worker.returncode is None:
+            worker.kill()
+            await worker.communicate()
+    async with rig.store.sessions() as session:
+        row = await session.scalar(select(Execution).where(Execution.id == eid))
+        old_lease = Lease(row.id, row.lease_token, row.lease_owner, row.correlation_id)
+    assert (await rig.store.get(eid)).state == State.RUNNING
+    await rig.expire(eid)
+    assert await rig.store.recover() == 1
+    fresh = await rig.store.claim("replacement", eid)
+    assert fresh.lease.token != old_lease.token
+    with pytest.raises(Fault, match="stale_lease"):
+        await rig.store.finish(old_lease, "late result")
+    await rig.store.finish(fresh.lease, "recovered")
+    assert (await rig.store.get(eid)).state == State.SUCCEEDED
+    assert await rig.effects() == 0

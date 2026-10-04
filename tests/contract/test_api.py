@@ -91,3 +91,19 @@ async def test_invalid_correlation_identifier_is_rejected(rig):
         response = await client.get("/health", headers={"X-Correlation-ID": "injected-log-content"})
         assert response.status_code == 422
         assert "injected-log-content" not in response.text
+
+
+async def test_readiness_rejects_missing_model_and_tool_configuration(rig):
+    rig.settings.model_provider = "openai"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(rig.settings, rig.runtime)),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/ready")
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "model_configuration_missing"
+        rig.settings.model_provider = "fake"
+        rig.settings.tool_api_token = None
+        response = await client.get("/ready")
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "tool_configuration_missing"

@@ -35,7 +35,6 @@ TRANSITIONS: dict[State, frozenset[State]] = {
     State.CREATED: frozenset({State.RUNNING, State.CANCELLED, State.FAILED_PERMANENT}),
     State.RUNNING: frozenset(
         {
-            State.CREATED,
             State.WAITING_FOR_APPROVAL,
             State.TOOL_EXECUTING,
             State.RETRY_PENDING,

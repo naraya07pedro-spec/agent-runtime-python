@@ -39,8 +39,13 @@ class Execution(Base):
             name="complete_lease",
         ),
         CheckConstraint(
-            "state NOT IN ('SUCCEEDED','FAILED_PERMANENT','CANCELLED') OR outcome IS NOT NULL",
+            "state NOT IN ('SUCCEEDED','FAILED_PERMANENT','CANCELLED') OR "
+            "(outcome IS NOT NULL AND jsonb_typeof(outcome) = 'object')",
             name="terminal_outcome",
+        ),
+        CheckConstraint(
+            "state NOT IN ('RUNNING','TOOL_EXECUTING') OR lease_token IS NOT NULL",
+            name="active_requires_lease",
         ),
         Index("ix_execution_ready", "state", "next_attempt_at"),
         Index("ix_execution_stale", "state", "lease_expires_at"),
@@ -77,6 +82,12 @@ class ToolCall(Base):
         CheckConstraint(
             "status IN ('PROPOSED','DISPATCHED','SUCCEEDED','FAILED')", name="call_status"
         ),
+        CheckConstraint("ordinal > 0 AND attempt >= 0", name="call_counters"),
+        CheckConstraint(
+            "status != 'SUCCEEDED' OR (external_id IS NOT NULL AND outcome IS NOT NULL "
+            "AND jsonb_typeof(outcome) = 'object')",
+            name="successful_call_outcome",
+        ),
     )
     id: Mapped[UUID] = mapped_column(primary_key=True)
     execution_id: Mapped[UUID] = mapped_column(ForeignKey("executions.id", ondelete="CASCADE"))
@@ -96,6 +107,13 @@ class ToolCall(Base):
 
 class Approval(Base):
     __tablename__ = "approvals"
+    __table_args__ = (
+        CheckConstraint(
+            "(decision IS NULL AND actor IS NULL AND decided_at IS NULL) OR "
+            "(decision IS NOT NULL AND actor IS NOT NULL AND decided_at IS NOT NULL)",
+            name="complete_approval_decision",
+        ),
+    )
     call_id: Mapped[UUID] = mapped_column(
         ForeignKey("tool_calls.id", ondelete="CASCADE"), primary_key=True
     )

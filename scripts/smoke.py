@@ -59,8 +59,16 @@ def main():
         approval=True,
     )
     wait_for(notification["id"], "SUCCEEDED")
+    assert request("GET", "/ready")["status"] == "ready"
+    metrics_request = Request(
+        base + "/metrics", headers={"Authorization": "Bearer " + env["RUNTIME_API_KEY"]}
+    )
+    with urlopen(metrics_request, timeout=15) as response:
+        metrics = response.read().decode()
+    assert 'runtime_executions{state="SUCCEEDED"}' in metrics
+    assert "runtime_requests_total" in metrics
     print(
-        "Compose smoke passed: TCP API, worker, migrations, duplicate admission, persisted approval, external sandbox effect."
+        "Compose smoke passed: TCP API, readiness, metrics, worker, migrations, duplicate admission, persisted approval, external sandbox effect."
     )
 
 

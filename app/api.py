@@ -12,7 +12,14 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import Settings
-from app.domain import ApprovalDecision, CreateExecution, ExecutionView, Fault, HistoryView
+from app.domain import (
+    ApprovalDecision,
+    CreateExecution,
+    ExecutionView,
+    ExternalFault,
+    Fault,
+    HistoryView,
+)
 from app.observability import configure_logging, logger
 from app.runtime import Runtime
 from app.security import IngressLimits, authenticate, verify_webhook
@@ -119,6 +126,15 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
                 raise Fault("schema_not_ready", 503)
         if config.api_key is None or config.approval_key is None:
             raise Fault("authentication_not_configured", 503)
+        if config.model_provider == "openai" and (
+            not config.openai_api_key or not config.openai_model
+        ):
+            raise Fault("model_configuration_missing", 503)
+        if config.allowed_tools:
+            try:
+                config.validate_tool_endpoint()
+            except ExternalFault as exc:
+                raise Fault(exc.code, 503) from exc
         return {"status": "ready"}
 
     @app.post(

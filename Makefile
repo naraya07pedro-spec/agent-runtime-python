@@ -11,12 +11,12 @@ lint:
 	uv run --locked ruff check .
 	uv run --locked mypy app
 test:
-	uv run --locked pytest --cov=app
+	REQUIRE_POSTGRES_TESTS=1 uv run --locked pytest --cov=app
 eval:
 	uv run --locked python -m evals.run
 benchmark:
 	uv run --locked python -m benchmarks.admission
 simulate:
-	uv run --locked pytest tests/failure_injection tests/concurrency -v
+	REQUIRE_POSTGRES_TESTS=1 uv run --locked pytest tests/failure_injection tests/concurrency -v
 smoke:
 	python3 scripts/smoke.py

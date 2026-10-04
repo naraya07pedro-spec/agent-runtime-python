@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -166,6 +167,7 @@ async def test_chunked_request_limit(rig):
     ) as client:
         response = await client.post("/webhooks", content=chunks())
         assert response.status_code == 413
+        assert response.json()["error"]["request_id"] == response.headers["X-Request-ID"]
 
 
 @pytest.mark.integration
@@ -178,4 +180,43 @@ async def test_ingress_rate_limit(rig):
         await client.get("/metrics")
         response = await client.get("/metrics")
         assert response.status_code == 429 and "Retry-After" in response.headers
+        assert response.json()["error"]["request_id"] == response.headers["X-Request-ID"]
         assert (await client.get("/health")).status_code == 200
+
+
+@pytest.mark.integration
+async def test_concurrent_webhook_replay_and_receipt_rollback(rig):
+    from sqlalchemy import func, select
+
+    from app.tables import WebhookReceipt
+
+    app = create_app(rig.settings, rig.runtime)
+    body = json.dumps({"business_key": "race-event", "prompt": "hello"}).encode()
+    headers = {**sign(body), "Content-Type": "application/json"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        responses = await asyncio.gather(
+            *(client.post("/webhooks", content=body, headers=headers) for _ in range(8))
+        )
+        assert sorted(r.status_code for r in responses) == [200] + [409] * 7
+        assert all(
+            r.status_code == 200 or r.json()["error"]["code"] == "webhook_replay" for r in responses
+        )
+        conflict = json.dumps({"business_key": "race-event", "prompt": "changed"}).encode()
+        rejected = await client.post(
+            "/webhooks",
+            content=conflict,
+            headers={"Content-Type": "application/json", **sign(conflict, nonce="z" * 24)},
+        )
+        assert rejected.status_code == 409
+        assert rejected.json()["error"]["code"] == "idempotency_conflict"
+        async with rig.store.sessions() as session:
+            assert await session.scalar(select(func.count()).select_from(WebhookReceipt)) == 1
+        # The failed admission must roll back its new nonce receipt atomically.
+        accepted = await client.post(
+            "/webhooks",
+            content=body,
+            headers={"Content-Type": "application/json", **sign(body, nonce="z" * 24)},
+        )
+        assert accepted.status_code == 200

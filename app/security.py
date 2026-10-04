@@ -60,6 +60,7 @@ class IngressLimits:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        request_id = str(scope.get("state", {}).get("request_id", "unassigned"))
         now = time.monotonic()
         self.tokens = min(
             float(self.capacity), self.tokens + (now - self.last) * self.capacity / 60
@@ -68,7 +69,7 @@ class IngressLimits:
         if scope["path"] not in {"/health", "/ready"}:
             if self.tokens < 1:
                 await JSONResponse(
-                    {"error": {"code": "ingress_rate_limited"}},
+                    {"error": {"code": "ingress_rate_limited", "request_id": request_id}},
                     status_code=429,
                     headers={"Retry-After": str(max(1, 60 // self.capacity))},
                 )(scope, receive, send)
@@ -81,9 +82,10 @@ class IngressLimits:
                 return
             data.extend(message.get("body", b""))
             if len(data) > self.max_bytes:
-                await JSONResponse({"error": {"code": "request_too_large"}}, status_code=413)(
-                    scope, receive, send
-                )
+                await JSONResponse(
+                    {"error": {"code": "request_too_large", "request_id": request_id}},
+                    status_code=413,
+                )(scope, receive, send)
                 return
             if not message.get("more_body", False):
                 break
