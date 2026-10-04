@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-10-04T18:21:26.230903+00:00",
+  "tested_commit": "876d507b25c94f03dfd144d2f24d431e5d812841",
+  "source_commit": "b7c4c9b3806d3b43cc02b6528a9e8879ec775161",
+  "run_id": "37224040909",
+  "python": "3.12.14",
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "trees": {
+    "app": "2de354484dc73b346dfa910012a4e83ad43842c6",
+    "tests": "a5507455974e80b196db9bad52bbab8a5700f8e9",
+    "migrations": "1e0b17afa2bb8bdc17d6b27db78ac4719f223829",
+    "uv.lock": "04c8164ff2a539e0e294bf36b939415654fa5a22"
+  }
+}

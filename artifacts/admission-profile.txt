@@ -1,0 +1,38 @@
+         275006 function calls (270026 primitive calls) in 0.344 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2344 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+1261/1259    0.007    0.000    0.682    0.001 /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/asyncio/base_events.py:1922(_run_once)
+1999/1997    0.002    0.000    0.607    0.000 /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/asyncio/events.py:86(_run)
+2039/2017    0.003    0.000    0.604    0.000 {method 'run' of '_contextvars.Context' objects}
+  599/597    0.002    0.000    0.440    0.001 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/anyio/_core/_tasks.py:322(_run_coro)
+  519/517    0.001    0.000    0.392    0.001 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/starlette/middleware/base.py:144(coro)
+  518/517    0.001    0.000    0.386    0.001 /home/runner/work/agent-runtime-python/agent-runtime-python/app/security.py:59(__call__)
+      477    0.001    0.000    0.377    0.001 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/starlette/middleware/exceptions.py:47(__call__)
+  954/477    0.002    0.000    0.376    0.001 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py:31(wrapped_app)
+      477    0.001    0.000    0.350    0.001 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/fastapi/middleware/asyncexitstack.py:15(__call__)
+      477    0.001    0.000    0.309    0.001 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/starlette/routing.py:672(__call__)
+      477    0.001    0.000    0.305    0.001 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/fastapi/routing.py:2766(app)
+      477    0.001    0.000    0.303    0.001 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/fastapi/routing.py:1294(handle)
+      477    0.001    0.000    0.110    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/starlette/routing.py:273(handle)
+      477    0.000    0.000    0.105    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/fastapi/routing.py:141(app)
+      518    0.001    0.000    0.090    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:173(greenlet_spawn)
+      477    0.001    0.000    0.084    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/fastapi/routing.py:144(app)
+      397    0.002    0.000    0.081    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/fastapi/routing.py:416(app)
+  596/180    0.006    0.000    0.062    0.000 {method 'switch' of 'greenlet.greenlet' objects}
+     1259    0.004    0.000    0.059    0.000 /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/selectors.py:451(select)
+     1259    0.050    0.000    0.050    0.000 {method 'poll' of 'select.epoll' objects}
+      337    0.001    0.000    0.046    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/fastapi/routing.py:351(run_endpoint_function)
+      100    0.000    0.000    0.044    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/benchmarks/admission.py:50(request)
+      100    0.000    0.000    0.044    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/httpx/_client.py:1838(post)
+      100    0.000    0.000    0.044    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/httpx/_client.py:1485(request)
+      337    0.000    0.000    0.041    0.000 /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/asyncio/selector_events.py:969(_read_ready)
+      337    0.016    0.000    0.041    0.000 /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/asyncio/selector_events.py:1009(_read_ready__data_received)
+  380/140    0.001    0.000    0.041    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/sqlalchemy/orm/state_changes.py:93(_go)
+      337    0.001    0.000    0.039    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/app/api.py:140(create)
+      100    0.000    0.000    0.037    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/httpx/_client.py:1594(send)
+       81    0.000    0.000    0.037    0.000 /home/runner/work/agent-runtime-python/agent-runtime-python/.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/session.py:2119(go)
+
+

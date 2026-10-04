@@ -1,0 +1,105 @@
+name: verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: runtime
+          POSTGRES_PASSWORD: runtime
+          POSTGRES_DB: runtime_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U runtime -d runtime_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://runtime:runtime@localhost:5432/runtime_test
+      RUNTIME_DATABASE_URL: postgresql+asyncpg://runtime:runtime@localhost:5432/runtime_test
+      REQUIRE_POSTGRES_TESTS: '1'
+      EVIDENCE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: '0.12.19'
+          enable-cache: true
+      - name: Start with fresh generated evidence
+        run: |
+          rm -rf artifacts
+          mkdir artifacts
+      - name: Locked dependencies
+        run: uv sync --locked
+      - name: Static quality
+        run: |
+          uv run --locked ruff format --check .
+          uv run --locked ruff check .
+          uv run --locked mypy app
+      - name: Migration from empty database and downgrade roundtrip
+        run: |
+          uv run --locked alembic upgrade head
+          uv run --locked alembic check
+          uv run --locked alembic downgrade base
+          uv run --locked alembic upgrade head
+          uv run --locked alembic check
+      - name: All tests on PostgreSQL
+        run: |
+          mkdir -p artifacts
+          uv run --locked pytest --cov=app --cov-report=term-missing --cov-report=json:artifacts/coverage.json --junitxml=artifacts/junit.xml
+      - name: Deterministic evals and measured admission benchmark
+        run: |
+          uv run --locked python -m evals.run
+          uv run --locked python -m benchmarks.admission
+      - name: Render evidence summaries
+        if: always()
+        run: uv run --locked python scripts/report.py
+      - name: Documentation link integrity
+        run: uv run --locked python scripts/check_docs.py
+      - name: Dependency audit
+        run: |
+          uv export --locked --no-dev --no-emit-project --format requirements-txt > /tmp/runtime-requirements.txt
+          uv run --locked pip-audit -r /tmp/runtime-requirements.txt --disable-pip --no-deps
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: verification-evidence-${{ github.sha }}
+          path: artifacts/
+          retention-days: 30
+
+  container-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Bootstrap unique local keys
+        run: python3 scripts/bootstrap.py
+      - name: Build and start complete stack
+        run: |
+          docker compose build api
+          docker compose up -d --wait --wait-timeout 120 --no-build
+      - name: Exercise real TCP API and worker
+        run: python3 scripts/smoke.py
+      - name: Diagnose failed stack
+        if: failure()
+        run: docker compose logs --no-color --tail 80
+      - name: Clean up isolated CI stack
+        if: always()
+        run: docker compose down -v
