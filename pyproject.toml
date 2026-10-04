@@ -12,7 +12,7 @@ dependencies = [
 [dependency-groups]
 dev = [
   "pytest>=8.3,<10", "pytest-asyncio>=0.25,<2", "pytest-cov>=6,<8",
-  "hypothesis>=6.120,<7", "ruff>=0.9,<1", "mypy>=1.14,<2",
+  "hypothesis>=6.120,<7", "ruff>=0.9,<1", "mypy>=1.14,<3",
   "pip-audit>=2.7,<3", "pre-commit>=4,<5",
 ]
 local = ["pgserver>=0.1,<1"]
