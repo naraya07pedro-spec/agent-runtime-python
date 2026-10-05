@@ -32,6 +32,8 @@ exclusions and sanitization. New fixtures preserve observed failure mechanisms a
 explicitly synthetic; private workflow/customer data is not copied. Committed
 [earlier reports](artifacts/test-summary.md) retain their original v1 SHA/date. Use current
 CI artifacts for later revisions; test counts are not counts of unique failure scenarios.
+The [v2 archive](evidence/v2/README.md) preserves its tested SHA, 261 passing tests,
+90.01% coverage and actual interruption/restore drill results.
 
 ## Architecture
 

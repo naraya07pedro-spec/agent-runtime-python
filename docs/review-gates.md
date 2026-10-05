@@ -2,7 +2,8 @@
 
 This review maps actual changes to executable evidence. It is a self-review, not an
 independent security audit or certification. Verification summaries retain exact source
-and tested commit identities; see [test evidence](../artifacts/test-summary.md).
+and tested commit identities; see [v2 evidence](../evidence/v2/README.md) and
+[the earlier v1 record](../artifacts/test-summary.md).
 
 | Gate | Finding / decision | Evidence |
 |---|---|---|

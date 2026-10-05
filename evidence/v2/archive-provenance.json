@@ -1,0 +1,25 @@
+{
+  "source_commit": "833a4eff040bea8b952e84d9b5207c2335c036c2",
+  "run_id": "37262155984",
+  "ci_url": "https://github.com/naraya07pedro-spec/agent-runtime-python/actions/runs/37262155984",
+  "artifact_id": 11325063111,
+  "artifact_zip_sha256": "907e7a8fb1610c59dc20b9db1fa0edb422044ed74ba344fe6ea5fe81eeca714b",
+  "artifact_name_uses_workflow_event_sha": true,
+  "archive_is_not_evidence_for_untested_future_commits": true,
+  "files": {
+    "admission-profile.txt": "0149e21cdc03865f3eed56c3ecc53e37853d2dd9e37b94d5c4156c439d35c562",
+    "benchmark-results.json": "b1b0ab80868f570e2d1f596e885908edf100ac4ea5856a5c238c951deb87691a",
+    "benchmark-summary.md": "0e56b57d324770013de4ad25c36d41a91bb7e0f33b0bdb6e90b3243bf78d0670",
+    "coverage-totals.json": "83d89ce1abf22dbf17d635df81f318bb38b572c79ac490e965a13529fb4ae7f7",
+    "eval-results.json": "a589fb146cc9c4db4169f5f8eb82704d04eccf7cbfb28d2191fdbb78816bfef3",
+    "eval-summary.md": "565f49e83ac5694ba222bd04e83ba32f533d44ee29f8fdecce5afb766aff01eb",
+    "junit.xml": "3cd9d1c71aea9198ccba017a217dab066b5f37a43ccad066c82ac18528dc597c",
+    "optional-provider-status.json": "74a29cf4fa6fc678aaed3f670c7fb45196d664e0a738242896ac2c837451278b",
+    "optional-provider.xml": "05dd8f1b0953aaa9db2ff88c0c990d1f2e2a5645a5fb64cacfdf45e9bb0f172c",
+    "recovery-drill.json": "2df3e33693acd27fe6a9829ed5d1fc7e0629e39687d4f1d5f30c2065d0fef5f3",
+    "recovery-summary.md": "5e1b3126f1c8dc5e4c6ce62f062baa49fc933bcaf8e15de3bd74f2d240aa38f8",
+    "test-counts.json": "4d86ad0a119518d5463e4b8496ec3f77dd68496f645e0951a70d847fab66822a",
+    "test-summary.md": "33a00522cefc570a1cda4f23e4109aa76c48b06016bf2cb672e28e98de7dd0f5",
+    "verification-provenance.json": "4e10090b2df6d0c63468c07a86ae7314ad3eb8e190b3e0155817359add92a65a"
+  }
+}
