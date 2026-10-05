@@ -43,3 +43,14 @@ numbers must include their environment and exclude any production-capacity claim
 Base: `main`, commit `a72df099963580bc2e50944742e6b9227a9df479`.
 The repository contained only a Python `.gitignore` and Evan Naraya's MIT license.
 Both are preserved. Work is isolated on `feat/staff-grade-agent-runtime`.
+
+## V2 invariants
+
+- Tenant identity is server-bound; every scoped read/write/approval inherits execution tenant.
+- Tenant business/idempotency/nonce identity is independent; lease mutation checks tenant.
+- GitHub approval and reconciliation retain their repository/actor binding; configuration
+  changes cannot retarget a previously approved action.
+- Reconciliation attempts persist before GET. Budget/deadline exhaustion stops automatic
+  lookup; operator abandonment records unknown effect without resetting dispatch identity.
+- Read-only restore mode blocks admission/claims; loss-window review precedes resumed writes.
+- SIGTERM stops new claims and drains bounded work; forced cancellation preserves durable intent.

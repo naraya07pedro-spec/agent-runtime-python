@@ -21,3 +21,8 @@ with promised dates.
 Kafka is not warranted by a benchmark of 300 admissions. Redis is not a replacement
 for durable identity. Kubernetes does not create recovery semantics. Start with a workload,
 a concrete bottleneck, and a failure test for the proposed change.
+
+V2 implements process export, tenant-scoped credentials/admission quotas and one concrete
+GitHub contract, plus controlled database interruption/restore. The remaining adoption
+triggers in this table concern deployment or the stronger OIDC/fairness/PITR/HA/fleet
+capabilities; they are not claims that this revision already operates them in production.

@@ -70,9 +70,10 @@ have structured outcomes and cannot return to active execution through the trans
 
 Approval authorizes one exact action, not a conversational intention. Hashing canonical
 arguments plus tool/effect/approval/version binds the decision to executable meaning.
+GitHub actions also bind the approved repository/actor, preventing configuration retargeting.
 Dispatch recomputes the digest and checks expiry; approval-time validation alone has a
-check/use gap. The separate credential is a demo of authority separation, not individual
-identity or enterprise RBAC.
+check/use gap. Tenant/role credential binding enforces application isolation, while
+individual human identity, OIDC and four-eyes approval remain unimplemented.
 
 ## Why distrust structured model output?
 
@@ -98,11 +99,31 @@ API scrape is not fleet throughput. The benchmark similarly measures admission o
 ## How would it evolve?
 
 First measure queue age, DB contention, downstream rate limits, and real workload latency.
-Add worker metric export, per-tenant identity/quotas, and a real provider recovery contract
-before claiming production readiness. Redis can support ephemeral distributed rate limits;
+V2 adds tenant-scoped identity/admission limits, process exporters, bounded reconciliation
+and a GitHub recovery contract tested with synthetic HTTP and real PostgreSQL. The next
+provider evidence is an explicitly opted-in live authenticated contract/recovery drill.
+Do not describe deterministic contracts as live production integrations. Redis can support ephemeral distributed rate limits;
 Kafka can help event fanout/replay with outbox/inbox discipline; Temporal can justify itself
 for durable timers and complex workflow coordination. None removes the external-effect
 ambiguity by itself. See [specific adoption triggers](scale-up.md).
 
 A defensible demonstration is: run the process-death test, inspect one dispatch and one
 provider effect, explain why absence does not permit replay, then name what remains untested.
+
+## Defensible recruiter statements
+
+- Built and tested a Python/FastAPI runtime with PostgreSQL state, explicit transitions,
+  ownership fencing and persistent human approvals.
+- Tested concurrent admission, stale completion, real abrupt worker exits and SIGTERM drain.
+- Implemented application tenant/role isolation, scoped tool policies and target-bound approval.
+- Implemented a bounded, read-only reconciliation lifecycle that does not blindly replay
+  uncertain non-idempotent writes.
+- Implemented a GitHub Issues adapter with synthetic native contract tests and PostgreSQL
+  timeout-after-commit recovery; live authenticated writes remain unverified.
+- Implemented and exercised disposable PostgreSQL interruption and backup/restore drills,
+  including ledger integrity and a read-only recovery guard.
+
+These describe code and measured tests. They do not establish Staff/Principal seniority,
+years, production customers, uptime, ROI, universal exactly-once effects, live-model quality
+or performance beyond the scoped admission benchmark. In an interview, demonstrate the
+assertions and name the boundary each leaves untested.

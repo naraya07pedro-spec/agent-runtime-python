@@ -27,9 +27,12 @@ def main():
             continue
         if file.suffix not in {".py", ".md", ".json", ".yml", ".yaml", ".toml", ".sh"}:
             continue
-        if file.stat().st_size > 2_000_000:
+        # CI removes previously generated reports from the working tree. Inspect
+        # the committed/staged Git blob, so that deletion cannot bypass this check.
+        size = int(subprocess.check_output(["git", "cat-file", "-s", ":" + name], text=True))
+        if size > 2_000_000:
             raise SystemExit("tracked-source check requires review of oversized artifact: " + name)
-        content = file.read_text(errors="replace")
+        content = subprocess.check_output(["git", "show", ":" + name]).decode(errors="replace")
         if any(pattern.search(content) for pattern in PATTERNS):
             findings.append(name)
     print(

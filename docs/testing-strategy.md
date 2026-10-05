@@ -9,10 +9,10 @@ ownership, deduplication, replay receipts, or recovery.
 | Unit | All 81 state pairs, fingerprint properties, terminal outcomes, bounds, error classification, logging redaction |
 | Contract | Strict API/provider schemas, missing configuration, bounded upstream bodies, identity validation |
 | Integration | Durable model/action lifecycle, approval mutation/expiry/denial, budgets, database constraints |
-| Concurrency | 20-way admission/ownership races, action and approval races, stale completion, controlled late-send schedule |
-| Failure injection | Pre-dispatch rollback, uncertain outcome, double DB failure, restart, Retry-After, recovery budgets |
+| Concurrency | Admission/ownership/approval races, late sends, tenant capacity/quota across independent connections |
+| Failure injection | Partial commits, poison jobs, bounded reconciliation/operator races, connection termination, real SIGTERM |
 | Process death | Real worker exits after claim and after irreversible provider success; replacement ownership/reconciliation |
-| Security | HMAC exact-byte binding, expired signatures, concurrent replay, atomic receipt rollback, separate authority, ingress bounds |
+| Security | HMAC/replay, tenant/role isolation, rotation, target-bound approval, policy and ingress limits |
 | Deterministic evals | Twelve fixed model decisions evaluated against real runtime policy; zero paid model calls |
 
 `pytest` marks cross-cut these directory categories. For example, a security test
@@ -41,6 +41,14 @@ structured eval/benchmark results, summaries, profile, and commit provenance are
 uploaded as a 30-day artifact. Selected results are archived in the repository with
 their original source/tested SHA; later CI artifacts remain authoritative for later heads.
 
-Coverage exposes untested code; it does not prove correctness. No arbitrary percentage
-is used as a substitute for the failure scenarios. The suite does not certify real
-LLM quality, live provider behavior, production load, backup restore, or multi-region failover.
+Coverage exposes untested code; it does not prove correctness. CI requires 87% combined
+statement/branch coverage alongside the scenario gates. No percentage replaces failure
+semantics. The suite does not certify real model quality, live authenticated provider writes,
+production load or multi-region failover.
+
+CI checks out the exact PR head, not a synthetic merge commit. A separate recovery drill
+uses a real PostgreSQL SIGKILL, rollback/reconnect, backup wrappers and isolated restore.
+It checks row integrity and reconciles only against the original synthetic provider ledger;
+its timings are controlled-drill measurements. The optional live-provider XML/status is
+reported separately: its default skip is not counted as a passing live contract.
+

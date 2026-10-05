@@ -83,6 +83,7 @@ class GitHubIssues:
                 body={"title": call.arguments["title"], "body": self.body(call)},
                 timeout_seconds=self.settings.tool_timeout,
                 response_headers=capture,
+                expected_status=201,
             )
             return self.result(json.loads(raw), call, capture.get("request_id"))
         except httpx.TransportError as exc:
@@ -106,6 +107,7 @@ class GitHubIssues:
                     headers=self.headers(),
                     timeout_seconds=self.settings.tool_timeout,
                     response_headers=capture,
+                    expected_status=200,
                 )
                 items = json.loads(raw)
                 if not isinstance(items, list) or len(items) > 10:

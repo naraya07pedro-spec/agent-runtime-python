@@ -16,12 +16,15 @@ async def bounded_request(
     body: JSON | None = None,
     max_bytes: int = 65536,
     response_headers: dict[str, str] | None = None,
+    expected_status: int | None = None,
 ) -> bytes:
     """Bound decompressed response bytes; do not trust Content-Length or follow redirects."""
     async with client.stream(
         method, url, headers=headers, json=body, timeout=timeout_seconds, follow_redirects=False
     ) as response:
         check_response(response)
+        if expected_status is not None and response.status_code != expected_status:
+            raise ExternalFault("provider_status_invalid", ambiguous=True)
         request_id = response.headers.get("x-github-request-id", "")
         if response_headers is not None and re.fullmatch(r"[A-Za-z0-9_:-]{1,128}", request_id):
             response_headers["request_id"] = request_id

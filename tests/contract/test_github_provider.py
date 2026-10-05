@@ -14,7 +14,9 @@ pytestmark = pytest.mark.contract
 
 @pytest.fixture
 def github_settings(settings):
-    settings.github_token = __import__("pydantic").SecretStr("synthetic-github-token")
+    from pydantic import SecretStr
+
+    settings.github_token = SecretStr("synthetic-github-token")
     settings.github_actor = "synthetic-bot"
     settings.github_repository = "synthetic-owner/synthetic-repo"
     return settings
@@ -177,10 +179,30 @@ async def test_lookup_is_bounded_and_does_not_follow_supplied_next_url(github_se
     )
 
 
-async def test_missing_configuration_fails_before_http_and_request_id_is_validated(settings):
+async def test_missing_configuration_fails_before_http(settings):
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: pytest.fail("unexpected network I/O"))
     ) as client:
         provider = GitHubIssues(client, settings)
         with pytest.raises(ExternalFault, match="github_configuration_missing"):
             await provider.execute(dispatch())
+
+
+@pytest.mark.parametrize("status", [200, 201])
+async def test_success_status_and_request_id_contract(github_settings, status):
+    call = dispatch()
+
+    def handle(request):
+        return httpx.Response(
+            status,
+            json=issue(provider, call),
+            headers={"X-GitHub-Request-ID": "invalid whitespace private value"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        provider = GitHubIssues(client, github_settings)
+        if status == 200:
+            with pytest.raises(ExternalFault, match="provider_status_invalid"):
+                await provider.execute(call)
+        else:
+            assert (await provider.execute(call)).provider_request_id is None

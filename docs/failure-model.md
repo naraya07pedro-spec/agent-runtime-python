@@ -32,3 +32,10 @@ production environment switch enables faults. Hooks cover before dispatch commit
 after durable dispatch, after external success, before outcome commit, and before
 reconciliation commit. Tests assert persisted state and provider effects, not only
 raised exceptions. Process-crash fixtures deliberately bypass normal cleanup.
+
+V2 adds real connection termination/idle-pool replacement, a real PostgreSQL container
+SIGKILL during an uncommitted transaction, a guarded restore with row-integrity comparison,
+and real SIGTERM during a committed sandbox effect. Reconciliation consumes a durable
+budget/deadline and operator abandonment preserves unknown effect. See [recovery drill](backup-restore.md)
+and [lifecycle](reconciliation.md). These specific controlled schedules do not certify
+arbitrary storage faults, all network partitions or production disaster recovery.

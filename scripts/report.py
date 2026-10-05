@@ -68,6 +68,27 @@ def main():
         )
         print(content)
     evaluation = root / "eval-results.json"
+    optional = root / "optional-provider.xml"
+    if optional.exists():
+        cases = list(ET.parse(optional).iter("testcase"))
+        status = {
+            "total": len(cases),
+            "skipped": sum(case.find("skipped") is not None for case in cases),
+            "failed": sum(
+                case.find("failure") is not None or case.find("error") is not None for case in cases
+            ),
+        }
+        (root / "optional-provider-status.json").write_text(json.dumps(status, indent=2) + "\n")
+        print("Optional live provider status (separate from default suite): " + json.dumps(status))
+    recovery = root / "recovery-drill.json"
+    if recovery.exists():
+        drill = json.loads(recovery.read_text())
+        content = "# Disposable database recovery drill\n\n" + context
+        content += f"Status: {drill['status']}. Synthetic sandbox only; no production RPO/RTO guarantee.\n\n"
+        content += f"Backup: {drill['backup_seconds']} s; reconnect after SIGKILL/start: {drill['restart_reconnect_seconds']} s; restore/integrity/reconciliation: {drill['restore_verification_seconds']} s.\n\n"
+        content += "Verified: interrupted transaction rejection and rollback, unavailable-state rejection, snapshot row integrity, blocked restored claims, stale pre-restore lease rejection, one original-provider effect and zero post-restore POSTs.\n"
+        (root / "recovery-summary.md").write_text(content)
+        print(content)
     if evaluation.exists():
         result = json.loads(evaluation.read_text())
         content = (
