@@ -28,6 +28,8 @@ class Runtime:
         self.tools, self.metrics = tools, metrics
 
     def for_tenant(self, tenant_id: str) -> Runtime:
+        if self.store.tenant_id == tenant_id:
+            return self
         return Runtime(
             self.store.for_tenant(tenant_id),
             self.provider,

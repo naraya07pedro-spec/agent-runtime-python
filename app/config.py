@@ -8,7 +8,9 @@ from app.identity import Credential, TenantConfig
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="RUNTIME_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="RUNTIME_", env_file=".env", extra="ignore", hide_input_in_errors=True
+    )
 
     database_url: str = "postgresql+asyncpg://runtime:runtime@localhost:5432/runtime"
     api_key: SecretStr | None = None

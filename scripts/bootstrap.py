@@ -7,10 +7,14 @@ from pathlib import Path
 
 def main():
     destination = Path(".env")
-    source = destination.read_text() if destination.exists() else Path(".env.example").read_text()
+    if destination.exists():
+        print("Existing local configuration left unchanged; contents were not read.")
+        return
+    source = Path(".env.example").read_text()
     keys = {
         "RUNTIME_API_KEY",
         "RUNTIME_APPROVAL_KEY",
+        "RUNTIME_OPERATOR_KEY",
         "RUNTIME_WEBHOOK_SECRET",
         "RUNTIME_TOOL_API_TOKEN",
     }

@@ -48,6 +48,10 @@ services:
       retries: 20
   worker:
     <<: *runtime
+    environment:
+      RUNTIME_DATABASE_URL: postgresql+asyncpg://runtime:runtime@db:5432/runtime
+      RUNTIME_WORKER_METRICS_PORT: '9101'
+    stop_grace_period: 35s
     command: ["python","-m","app.worker"]
     depends_on:
       api: {condition: service_healthy}

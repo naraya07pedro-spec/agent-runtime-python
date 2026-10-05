@@ -15,7 +15,7 @@ pytestmark = pytest.mark.failure
 
 
 async def ambiguous(rig):
-    eid = await rig.create("ticket customer demo")
+    eid = await rig.create("create ticket demo")
 
     def fail(stage):
         if stage == "after_external_success":
@@ -55,7 +55,7 @@ async def test_lookup_budget_exhaustion_is_durable_and_manual_lookup_cannot_repl
 
 
 async def ambiguous_second(rig):
-    eid = await rig.create("ticket customer demo")
+    eid = await rig.create("create ticket demo")
     work = await rig.store.claim("w", eid)
     spec = rig.runtime.registry.get("upsert_ticket")
     call_id = await rig.store.propose(
@@ -181,7 +181,7 @@ async def test_poison_model_job_is_quarantined_and_next_execution_progresses(rig
 
 
 async def test_unexpected_exception_after_side_effect_stays_ambiguous(rig):
-    eid = await rig.create("ticket customer demo")
+    eid = await rig.create("create ticket demo")
 
     def fail(stage):
         if stage == "after_external_success":

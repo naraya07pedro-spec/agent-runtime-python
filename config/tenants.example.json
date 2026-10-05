@@ -1,0 +1,11 @@
+[
+  {
+    "id": "example-tenant",
+    "api_keys": [],
+    "approval_keys": [],
+    "operator_keys": [],
+    "webhook_secrets": [],
+    "allowed_tools": [],
+    "github_repository": null
+  }
+]

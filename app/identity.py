@@ -12,13 +12,13 @@ type Role = Literal["api", "approval", "operator"]
 
 
 class Credential(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,32}$")
     key: SecretStr = Field(repr=False, exclude=True)
 
 
 class TenantConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     id: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$")
     api_keys: tuple[Credential, ...] = Field(default=(), repr=False, exclude=True)
     approval_keys: tuple[Credential, ...] = Field(default=(), repr=False, exclude=True)

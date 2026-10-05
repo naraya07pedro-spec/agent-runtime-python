@@ -66,7 +66,13 @@ def main():
     with urlopen(metrics_request, timeout=15) as response:
         metrics = response.read().decode()
     assert 'runtime_executions{state="SUCCEEDED"}' in metrics
-    assert "runtime_requests_total" in metrics
+    assert "runtime_durable_dispatches" in metrics
+    process_request = Request(
+        base + "/process-metrics",
+        headers={"Authorization": "Bearer " + env["RUNTIME_OPERATOR_KEY"]},
+    )
+    with urlopen(process_request, timeout=15) as response:
+        assert "runtime_requests_total" in response.read().decode()
     print(
         "Compose smoke passed: TCP API, readiness, metrics, worker, migrations, duplicate admission, persisted approval, external sandbox effect."
     )

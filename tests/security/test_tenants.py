@@ -157,7 +157,7 @@ async def test_same_business_action_and_webhook_nonce_are_independent_per_tenant
 async def test_tenant_policy_denies_write_and_lease_cannot_change_tenant(rig):
     _, beta = configure_tenants(rig)
     eid, _ = await beta.store.create(
-        CreateExecution(business_key="denied", prompt="ticket customer demo"), "denied", uuid4()
+        CreateExecution(business_key="denied", prompt="create ticket demo"), "denied", uuid4()
     )
     await beta.advance("w", eid)
     assert (await beta.store.get(eid)).error_code == "tool_not_allowed"
