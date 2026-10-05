@@ -46,7 +46,7 @@ async def test_http_statuses_openapi_and_metrics(rig):
         assert history.status_code == 200 and history.json()["next_cursor"]
         metrics = await client.get("/metrics", headers=headers)
         assert 'runtime_executions{state="SUCCEEDED"} 1' in metrics.text
-        assert "runtime_tool_calls_total" in metrics.text
+        assert "runtime_durable_dispatches" in metrics.text
         schema = (await client.get("/openapi.json")).json()
         assert "ExecutionView" in schema["components"]["schemas"]
         assert "Execution" not in schema["components"]["schemas"]

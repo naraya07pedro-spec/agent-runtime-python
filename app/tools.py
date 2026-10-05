@@ -26,6 +26,11 @@ class RefundInput(CustomerInput):
     amount_cents: int = Field(ge=1, le=100000)
 
 
+class IssueInput(Contract):
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1, max_length=1000)
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -50,6 +55,15 @@ class ToolSpec:
 class Registry:
     def __init__(self, allowed: frozenset[str], timeout: float = 10) -> None:
         specs = [
+            ToolSpec(
+                "create_issue",
+                "Create one issue in the administrator-bound GitHub repository",
+                IssueInput,
+                "issue:create",
+                "irreversible",
+                True,
+                timeout,
+            ),
             ToolSpec(
                 "lookup_customer",
                 "Read a sandbox customer record",
@@ -120,7 +134,7 @@ class HttpTools:
         self.client = client
         self.settings = settings
 
-    def preflight(self) -> None:
+    def preflight(self, tool: str | None = None, tenant_id: str = "legacy") -> None:
         self.settings.validate_tool_endpoint()
 
     def headers(self) -> dict[str, str]:
@@ -171,3 +185,6 @@ class HttpTools:
             raise ExternalFault("reconciliation_transport", transient=True) from exc
         except (ValidationError, ValueError) as exc:
             raise ExternalFault("reconciliation_response_invalid", ambiguous=True) from exc
+
+    async def lookup_for(self, call: Dispatch) -> ReconcileResult:
+        return await self.lookup(call.operation_key, call.fingerprint)

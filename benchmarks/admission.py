@@ -43,6 +43,7 @@ async def run(count, concurrency, warmup):
         api_key=secrets.token_urlsafe(32),
         approval_key=secrets.token_urlsafe(32),
         requests_per_minute=100000,
+        tenant_admissions_per_minute=100000,
     )
     async with services(config) as runtime:
         app = create_app(config, runtime)

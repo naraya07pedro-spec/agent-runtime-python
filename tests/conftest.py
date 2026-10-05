@@ -50,6 +50,8 @@ def settings():
         allow_local_sandbox=True,
         retry_base_seconds=0,
         requests_per_minute=100000,
+        tenant_admissions_per_minute=100000,
+        reconciliation_backoff_seconds=0,
     )
 
 
@@ -92,7 +94,7 @@ async def rig(database_url, settings):
         await connection.run_sync(SandboxBase.metadata.create_all)
         await connection.execute(
             text(
-                "TRUNCATE execution_events, approvals, tool_calls, executions, webhook_receipts, sandbox_external_effects RESTART IDENTITY CASCADE"
+                "TRUNCATE execution_events, reconciliations, approvals, tool_calls, executions, webhook_receipts, sandbox_external_effects RESTART IDENTITY CASCADE"
             )
         )
     sandbox = create_sandbox(settings, sessions)
