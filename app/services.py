@@ -5,11 +5,12 @@ import httpx
 
 from app.config import Settings
 from app.db import connect
+from app.github_provider import ProviderTools
 from app.observability import Metrics
 from app.providers import FakeProvider, ModelProvider, OpenAIProvider
 from app.runtime import Runtime
 from app.store import Store
-from app.tools import HttpTools, Registry
+from app.tools import Registry
 
 
 @asynccontextmanager
@@ -27,10 +28,13 @@ async def services(settings: Settings) -> AsyncIterator[Runtime]:
                 else FakeProvider()
             )
             yield Runtime(
-                Store(sessions, settings),
+                Store(sessions, settings, tenant_id=None),
                 provider,
-                Registry(settings.allowed_tools, settings.tool_timeout),
-                HttpTools(client, settings),
+                Registry(
+                    frozenset().union(*(t.allowed_tools for t in settings.identities())),
+                    settings.tool_timeout,
+                ),
+                ProviderTools(client, settings),
                 Metrics(),
             )
     finally:

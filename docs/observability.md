@@ -1,44 +1,39 @@
-# Observability and its limits
+# Observability and aggregation boundaries
 
-The authoritative audit trail is `execution_events`, inserted in the same transaction
-as each state change. Inspect `GET /executions/{id}` and
-`GET /executions/{id}/events?cursor=0&limit=100` with the API credential. History uses
-keyset pagination; follow `next_cursor` until null. Events cover admission, ownership,
-model call/usage, proposals, approval, dispatch, outcome, retry, recovery, and reconciliation.
+Transactional execution events are the authoritative runtime history. Logs carry fixed
+JSON event names, request/correlation/execution/action IDs and allowlisted scalar metadata;
+raw prompts, provider bodies, exception repr and credentials are omitted. Validation errors
+hide input values; SQLAlchemy hides parameter values. This is redaction, not data encryption.
+Events include tenant-scoped approval credential IDs, recovery attempts and operator actions.
+No tamper-proof external audit archive or OpenTelemetry traces are implemented.
 
-Each HTTP request gets a new `X-Request-ID`. A valid UUID `X-Correlation-ID` can be
-provided by the caller; otherwise one is generated. Admission persists that correlation
-ID, which follows subsequent worker logs. A later HTTP request has its own request
-correlation; use execution ID to join its access log to the original execution.
+| Surface | Metric / meaning | Aggregation rule |
+|---|---|---|
+| API `/metrics`, tenant API key | runtime_executions by state, runtime_durable_dispatches from DB events | Already covers all workers for that tenant; select one canonical scrape or deduplicate identical replica gauges |
+| API `/process-metrics`, legacy infrastructure operator key | HTTP responses and process-local runtime counters/histograms | Scrape every API process directly; a load-balanced endpoint can miss processes |
+| Worker loopback exporter, RUNTIME_WORKER_METRICS_PORT | Advances, tool dispatches/duration, retries, reconciliation outcomes and classified errors in that worker | Scrape every worker; keep instance labels and sum rates/histogram buckets externally |
 
-JSON logs include timestamp, level, a fixed event name, and allowlisted fields:
-request/correlation/execution/action IDs, tool, attempt, state/transition, provider,
-duration, classified error, and outcome. Fields not relevant to an event are null.
-Not every transition is duplicated into logs; durable events are the complete state
-history. Model usage events contain reported input/output tokens and nullable cost.
-Unknown cost remains null rather than being presented as zero.
+The worker exporter defaults off; Compose enables port 9101 inside the worker on loopback.
+It is not published publicly. Scrape from a same-network-namespace collector or expose only
+on an explicitly protected private monitoring network. API process metrics use separate
+infrastructure authority; custom tenant API/operator keys cannot read cross-tenant process
+activity. One application process per scrape target avoids ambiguous multi-worker HTTP
+routing. Client multiprocess mode is not silently enabled and no deployed collector is claimed.
 
-| Metric | Meaning / caution |
-|---|---|
-| `runtime_requests_total{status}` | HTTP responses observed by correlation middleware; early validation/unknown exceptions are not a complete access-log census |
-| `runtime_advances_total` | Claimed turns in the current process |
-| `runtime_tool_calls_total{tool}` | Dispatches observed in the current process |
-| `runtime_tool_call_duration_seconds{tool}` | Outbound tool I/O histogram |
-| `runtime_retry_total` | Retry scheduling paths observed in the current process |
-| `runtime_reconciliation_total{outcome}` | Lookup results: found, absent, or unknown |
-| `runtime_errors_total` | Classified external failures, not every application error |
-| `runtime_executions{state}` | Current durable DB counts, queried at scrape time |
+For Prometheus process-counter aggregation, an example is
+`sum by (tool) (rate(runtime_tool_calls_total[5m]))` across distinct API/worker targets.
+Histogram bucket rates must also be summed before quantile computation. Counter resets are
+expected on restart. Never sum runtime_executions/runtime_durable_dispatches across multiple
+replicas of the same tenant/database; that multiplies the same fact. Dispatch event counts
+represent retained intent, including uncertain operations, not successful external effects.
+DB retention/deletion/restore can reduce those gauges.
 
-`GET /metrics` requires the API credential. Counters/histograms are **process-local**:
-a Compose API scrape does not aggregate the separate worker's counters. DB state
-gauges and execution history include worker effects. A production deployment needs
-worker metric export and multi-process aggregation before setting rate-based SLOs.
-Avoid execution IDs, prompts, customer IDs, or business keys as metric labels.
+Do not label metrics with execution/business/customer IDs, prompts, URLs or secrets. Suggested
+operator signals include manual-review count/age, oldest due work, stale leases, 429/503 rates
+and dependency saturation. Alert thresholds and SLOs need a real workload study. Correlation
+IDs aid diagnosis but do not constitute end-to-end trace coverage.
 
-`/health` proves only process liveness. `/ready` checks DB access and migration revision,
-required API/approval configuration, selected model credentials, and configured tool
-endpoint policy. It does not send a billable model call or prove provider availability.
-
-Suggested operator signals, not claimed implemented alert rules: age/count of unresolved
-reconciliations, due work age, stale leases, 5xx rate, and dependency saturation. Set
-thresholds from a workload/SLO study; this repository has no measured production SLO.
+`/health` proves process liveness only. `/ready` checks DB access, revision 0002, auth/provider
+configuration and tool endpoint policy; read-only restore mode returns unavailable. Neither
+endpoint makes a paid model call or proves provider availability. Full database disconnects
+are sanitized as unavailability, including compound IPv4/IPv6 connection refusals.

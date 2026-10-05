@@ -1,6 +1,6 @@
 # Operator runbook
 
-## Start and inspect the sandbox
+## Start and inspect
 
 ```bash
 python3 scripts/bootstrap.py
@@ -10,98 +10,83 @@ docker compose ps
 docker compose logs --tail 100 api worker
 ```
 
-The Compose stack includes its own PostgreSQL server; no host PostgreSQL installation
-is needed. Database port 5432 is not published. `migrate` is a one-shot prerequisite;
-its successful exit is normal. API port 8000 binds only to loopback. The provider is
-a sandbox: notifications/refunds create rows, not real messages or money movements.
+Bootstrap creates new local credentials only if `.env` is absent; it does not inspect or
+modify an existing file. Existing installations must provision the new operator key outside
+chat. The demo sends no real notifications/money. Migration is a one-shot prerequisite;
+only API port 8000 is published on loopback. Secrets are injected into authorized clients;
+do not print tokens/configuration or put them in issue reports.
 
-For authenticated requests, read the generated `.env` into an operator process without
-printing it or committing it. This Python snippet inspects readiness and metrics:
+Preserve business key, Idempotency-Key and body across admission retries. Inspect execution
+and paginated events using the tenant API credential. The worker polls automatically.
+Review exact args, provider binding, fingerprint and expiration before the separate approval
+credential decides. An expired decision cannot be renewed or borrowed by a changed action.
 
-```python
-from pathlib import Path
-from urllib.request import Request, urlopen
+## Triage
 
-values = dict(
-    line.split("=", 1)
-    for line in Path(".env").read_text().splitlines()
-    if "=" in line and not line.startswith("#")
-)
-for path in ["/ready", "/metrics"]:
-    request = Request(
-        "http://127.0.0.1:8000" + path,
-        headers={"Authorization": "Bearer " + values["RUNTIME_API_KEY"]},
-    )
-    print(urlopen(request, timeout=10).read().decode())
-```
-
-`POST /executions` requires `Idempotency-Key` and a body such as
-`{"business_key":"case-001","prompt":"lookup customer demo"}`. Preserve both keys
-and the entire request on retries. The worker polls automatically; an operator can
-also call `POST /executions/{id}/advance`. Read status and paginated `/events`.
-The smoke script supplies a complete runnable admission and approval example.
-
-## Triage by state
-
-| Symptom | Inspect | Safe next action |
+| Symptom | Inspect | Safe action |
 |---|---|---|
-| Readiness 503 | Error code, DB health, migration revision, credentials | Repair configuration/DB; never disable auth to make readiness green |
-| CREATED never advances | Worker logs; DB connection; deadline | Restart worker; normal claims are safe under duplicate workers |
-| RUNNING / TOOL_EXECUTING with expired lease | DB lease expiry, dispatch event, provider logs | Run worker recovery; it classifies safe retry versus uncertain write |
-| WAITING_FOR_APPROVAL | Action ID, exact args/fingerprint, expiry | Authorized human approves/denies with separate credential; expired decision cannot be renewed |
-| RETRY_PENDING | `next_attempt_at`, error class, retry count | Wait until due; do not shorten Retry-After manually |
-| RECONCILIATION_REQUIRED | Dispatch event and provider operation identity | Call `/reconcile`; only positive matching provider evidence completes the action |
-| FAILED_PERMANENT | Classified error, prior successful tool events | Investigate; failure does not undo prior effects |
-| Many 409 responses | Idempotency conflict, replay, stale lease, approval state | Preserve identity and inspect history; do not invent new keys to bypass safety |
+| Readiness 503 / DB disconnect | Classified code, service health, schema 0002, maintenance mode | Restore connectivity/configuration; keep auth enabled |
+| Cross-tenant/nonexistent ID 404 | Credential's bound tenant and role | Correct authorized identity; do not switch headers to forge a tenant |
+| Admission 429 | Tenant capacity/quota and due/manual-review backlog | Respect Retry-After, drain or investigate; identical duplicate identity remains usable outside maintenance |
+| CREATED/RETRY_PENDING delayed | Worker availability, due time, deadline | Restart healthy worker; preserve operation identity |
+| Expired RUNNING/TOOL_EXECUTING | Lease and dispatch event | Recovery classifies read/model retry versus uncertain write |
+| WAITING_FOR_APPROVAL | Exact action/target/expiry | Authorized approve/deny; never treat model text as permission |
+| AMBIGUOUS/RECONCILING | Lookup attempt/budget/deadline and provider binding | Allow bounded read-only recovery; no write reset |
+| MANUAL_REVIEW | Independent provider history and trust/retention limits | One explicit operator lookup, or audited abandonment with unknown effect |
+| Poison-job quarantine | Error code and retained history | Diagnose defect with synthetic reproduction; no automatic replay |
+| FAILED_PERMANENT/ABANDONED | Prior successful actions and effect_unknown flag | Preserve evidence; failure does not undo external effects |
+| Repeated 409 | Conflict/replay/stale owner/approval state | Fix identity discipline; do not manufacture a new key to bypass safety |
 
-Run recovery without dispatching new work:
+`docker compose exec worker python -m app.worker --recover-only` repairs stale leases without
+new model/tool dispatch. Normal workers also visit due reconciliation. API `/reconcile` is
+budgeted; the tenant's separate operator credential can POST `/executions/{id}/operator`
+with lookup/verification or abandon/operator_decision. See [exact semantics](reconciliation.md).
+No endpoint accepts an injected success result, force replay or uncertain-write cancellation.
 
-```bash
-docker compose exec worker python -m app.worker --recover-only
-```
+A replay investigation means inspect history and perform read-only lookup. Re-running a new
+business key is a new external action, not recovery. If a GitHub response times out, locate
+its marker in the bound repository and trusted actor history; edited/missing/duplicate
+results remain unresolved. A changed repository/actor invalidates pending authority/lookup.
 
-For reconciliation, `POST /executions/{id}/reconcile` uses the API key. Lookup is
-read-only toward the provider. `provider_absent_no_replay` or unknown means leave the
-operation unresolved. A paused old worker may still send later. No supported endpoint
-forces replay, injects a synthetic success, or cancels an uncertain write. Escalate to
-the provider/operator and preserve evidence; do not delete identity rows to unblock it.
+## Interruption and recovery
 
-If PostgreSQL was unavailable after a side effect, restore connectivity first. The
-committed dispatch intent remains recovery evidence. Never report success from logs
-alone; read the durable state and provider result. Backup restores can lose recent
-identity/outcome records: isolate workers, reconcile externally, and review the restore
-window before resuming dispatch. Backup/PITR restoration is not tested in this repo.
+After database unavailability, reconnect and inspect durable intent. Do not infer success
+from a log or reset the row. Failed transactions roll back; the worker does not transparently
+retry a write whose external outcome is unknown. Stale connections are pre-pinged and stale
+ownership remains fenced. Run the isolated [connection tests](../tests/failure_injection/test_database_interruptions.py)
+and [SIGKILL/restore drill](backup-restore.md) only against synthetic disposable databases.
 
-## Migrations and shutdown
+Before restore: stop admission and all workers, fence old deployments, and configure
+RUNTIME_RECOVERY_READ_ONLY=true in EVERY new API/worker process. A shell export does not
+change running Compose containers. Keep read-only mode through schema/row/tenant validation
+and review of provider effects since the snapshot. Positive evidence can resolve persisted
+uncertain dispatches; lost post-snapshot intent cannot be automatically reconstructed.
+Only resume after a recorded operator review. Promotion/destructive operations are manual.
 
-```bash
-docker compose run --rm migrate
-# Stop containers while preserving the named database volume:
-docker compose down
-```
+## Shutdown and schema evolution
 
-`docker compose down -v` intentionally destroys sandbox data; use only for disposable
-demos/CI. Downgrade to `base` drops all runtime tables. CI tests that roundtrip only
-on a dedicated empty/disposable database. Future deployed revisions should use additive
-migrations, backfill validation, and rollout compatibility rather than editing revision
-0001. Its final pre-release definition is frozen in this repository.
+SIGTERM/SIGINT stop new claims. The active cycle drains for RUNTIME_WORKER_DRAIN_SECONDS
+(default 30), then cancellation leaves durable intent for lease recovery. Compose grants
+35 seconds. SIGKILL skips cleanup; leases/dispatch state provide recovery evidence. A local
+stop cannot cancel a request already accepted externally. Real SIGTERM and abrupt process
+exit tests exercise specific boundaries, not every possible instruction-level fault.
 
-Abrupt worker shutdown is handled through leases, not guaranteed graceful drain. If a
-process dies during a write, expect reconciliation. The API HTTP client and database
-engine are closed on lifespan exit. Compose startup, actual TCP execution, and cleanup
-are exercised by CI; multi-host rolling upgrades are not.
+Drain old workers before 0002 upgrade; mixed-version rolling deployment is not certified.
+0001 is frozen. 0002 preserves legacy operation identities and backfills uncertainty rows.
+The downgrade refuses tenant/reconciliation/provider-binding evidence loss. CI's base
+roundtrip uses an empty disposable database only. Never delete evidence to force downgrade.
+`docker compose down` preserves the volume; `down -v` destroys demo data and is CI-only.
 
-## Reproduce failures
+## Security and incident handoff
 
-Use a dedicated PostgreSQL database whose name ends in `_test`:
+Rotate keys with [configured overlap/cutover](tenant-model.md), distribute the change to
+all processes, then revoke the old key. API/approval/operator roles remain separate.
+Keep logs, execution/event IDs and independent provider request references; exclude raw
+payloads, client identifiers and secrets from public incidents. Restrict provider credentials,
+monitor 429/503/manual-review age and compare [process/DB metrics](observability.md) correctly.
+For suspected provider/worker/DB compromise, stop dispatch and preserve private evidence;
+application fencing does not establish trustworthy state under a malicious administrator.
 
-```bash
-export TEST_DATABASE_URL=postgresql+asyncpg://runtime:runtime@localhost:5432/runtime_test
-export RUNTIME_DATABASE_URL="$TEST_DATABASE_URL"
-make test
-make simulate
-```
-
-Tests truncate runtime and sandbox tables. The suffix guard prevents accidental use
-of a normally named database but does not replace operator care. Tests must not run
-against customer data. Fault hooks are test-injected; they are not exposed as an API.
+Reproduce using a dedicated *_test PostgreSQL database: `REQUIRE_POSTGRES_TESTS=1 uv run pytest`.
+Tests truncate runtime/sandbox tables. Neither the suffix guard nor this runbook authorizes
+using customer data. No production uptime, RPO/RTO or incident-response certification is claimed.

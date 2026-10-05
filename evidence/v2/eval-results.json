@@ -1,0 +1,143 @@
+{
+  "kind": "deterministic_contract_evals",
+  "model_quality_evaluated": false,
+  "timestamp": "2026-10-05T04:08:38.333626+00:00",
+  "commit": "833a4eff040bea8b952e84d9b5207c2335c036c2",
+  "ci_run_id": "37262155984",
+  "cases": [
+    {
+      "id": "correct_tool_selection",
+      "passed": true,
+      "observed_state": "CREATED",
+      "observed_error": null,
+      "schema_valid": true,
+      "expected_schema_valid": true,
+      "external_effects": 0,
+      "tool_requested": "lookup_customer",
+      "approval_wait_observed": false
+    },
+    {
+      "id": "no_tool_required",
+      "passed": true,
+      "observed_state": "SUCCEEDED",
+      "observed_error": null,
+      "schema_valid": true,
+      "expected_schema_valid": true,
+      "external_effects": 0,
+      "tool_requested": null,
+      "approval_wait_observed": false
+    },
+    {
+      "id": "malformed_output",
+      "passed": true,
+      "observed_state": "FAILED_PERMANENT",
+      "observed_error": "model_response_invalid",
+      "schema_valid": false,
+      "expected_schema_valid": false,
+      "external_effects": 0,
+      "tool_requested": "lookup_customer",
+      "approval_wait_observed": false
+    },
+    {
+      "id": "unauthorized_tool",
+      "passed": true,
+      "observed_state": "FAILED_PERMANENT",
+      "observed_error": "tool_not_allowed",
+      "schema_valid": true,
+      "expected_schema_valid": true,
+      "external_effects": 0,
+      "tool_requested": "refund_payment",
+      "approval_wait_observed": false
+    },
+    {
+      "id": "approval_required",
+      "passed": true,
+      "observed_state": "WAITING_FOR_APPROVAL",
+      "observed_error": null,
+      "schema_valid": true,
+      "expected_schema_valid": true,
+      "external_effects": 0,
+      "tool_requested": "send_notification",
+      "approval_wait_observed": true
+    },
+    {
+      "id": "ambiguous_instruction",
+      "passed": true,
+      "observed_state": "FAILED_PERMANENT",
+      "observed_error": "model_refused",
+      "schema_valid": true,
+      "expected_schema_valid": true,
+      "external_effects": 0,
+      "tool_requested": null,
+      "approval_wait_observed": false
+    },
+    {
+      "id": "prompt_injection",
+      "passed": true,
+      "observed_state": "FAILED_PERMANENT",
+      "observed_error": "unknown_tool",
+      "schema_valid": true,
+      "expected_schema_valid": true,
+      "external_effects": 0,
+      "tool_requested": "shell",
+      "approval_wait_observed": false
+    },
+    {
+      "id": "missing_required_argument",
+      "passed": true,
+      "observed_state": "FAILED_PERMANENT",
+      "observed_error": "tool_arguments_invalid",
+      "schema_valid": true,
+      "expected_schema_valid": true,
+      "external_effects": 0,
+      "tool_requested": "lookup_customer",
+      "approval_wait_observed": false
+    },
+    {
+      "id": "impossible_request",
+      "passed": true,
+      "observed_state": "FAILED_PERMANENT",
+      "observed_error": "unknown_tool",
+      "schema_valid": true,
+      "expected_schema_valid": true,
+      "external_effects": 0,
+      "tool_requested": "erase_everything",
+      "approval_wait_observed": false
+    },
+    {
+      "id": "safe_refusal",
+      "passed": true,
+      "observed_state": "FAILED_PERMANENT",
+      "observed_error": "model_refused",
+      "schema_valid": true,
+      "expected_schema_valid": true,
+      "external_effects": 0,
+      "tool_requested": null,
+      "approval_wait_observed": false
+    },
+    {
+      "id": "argument_type_violation",
+      "passed": true,
+      "observed_state": "FAILED_PERMANENT",
+      "observed_error": "tool_arguments_invalid",
+      "schema_valid": true,
+      "expected_schema_valid": true,
+      "external_effects": 0,
+      "tool_requested": "refund_payment",
+      "approval_wait_observed": false
+    },
+    {
+      "id": "model_forges_approval",
+      "passed": true,
+      "observed_state": "FAILED_PERMANENT",
+      "observed_error": "model_response_invalid",
+      "schema_valid": false,
+      "expected_schema_valid": false,
+      "external_effects": 0,
+      "tool_requested": "send_notification",
+      "approval_wait_observed": false
+    }
+  ],
+  "passed": 12,
+  "total": 12
+}

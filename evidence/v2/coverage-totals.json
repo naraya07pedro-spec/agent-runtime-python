@@ -1,0 +1,22 @@
+{
+  "source_commit": "833a4eff040bea8b952e84d9b5207c2335c036c2",
+  "run_id": "37262155984",
+  "derived_from": "coverage.json from the linked CI artifact; totals unmodified",
+  "original_file_sha256": "f594456e6d9c9ebff276a5f4d3168942c138d6b186608068187d45fa4b4bf5fe",
+  "totals": {
+    "covered_lines": 1508,
+    "num_statements": 1634,
+    "percent_covered": 90.00999000999,
+    "percent_covered_display": "90",
+    "missing_lines": 126,
+    "excluded_lines": 10,
+    "percent_statements_covered": 92.28886168910648,
+    "percent_statements_covered_display": "92",
+    "num_branches": 368,
+    "num_partial_branches": 60,
+    "covered_branches": 294,
+    "missing_branches": 74,
+    "percent_branches_covered": 79.8913043478261,
+    "percent_branches_covered_display": "80"
+  }
+}

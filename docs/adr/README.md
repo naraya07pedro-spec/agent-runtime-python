@@ -43,8 +43,8 @@ uncertainty. One DB transaction never remains open across a provider request.
 **Decision:** fingerprint exact tool/args/effect/approval policy/version; persist one immutable
 decision and expiry, revalidate on dispatch, separate approval credential.
 **Alternative:** a prompt saying “approved,” an in-memory flag, or reusable blanket approval.
-**Consequence:** stale/mutated actions cannot borrow authority. Shared-key actor attribution
-is coarse and would need real identity for multi-user deployment.
+**Consequence:** stale/mutated actions cannot borrow authority. Configured tenant/role credential IDs now separate authority; attribution remains key based,
+not verified individual identity. GitHub action fingerprints additionally bind repository/actor.
 
 ## 006 — Typed, default-deny tool registry
 
@@ -90,3 +90,48 @@ and emit only flat allowlisted log metadata and fixed event names.
 **Alternative:** reconstruct state from access logs or log arbitrary exception/body content.
 **Consequence:** persisted history is reliable evidence; sanitized logs give less diagnostic
 detail. Worker metrics are process-local; fleet export is a separate deployment concern.
+
+## 011 — Server-bound tenant identity and shared admission bounds
+
+**Context:** globally unique keys and shared API authority cannot isolate unrelated tenants.
+**Decision:** server-side tenant/role credential bindings, scoped execution queries/approvals,
+tenant business/idempotency/nonce uniqueness and a claimed lease tenant. PostgreSQL advisory
+locks serialize capacity/quota checks across API processes; child rows inherit identity
+through their execution FK. Preserve legacy keys.
+**Consequence:** no new identity service/queue is needed, but workers/DBAs remain privileged.
+Configuration rotation needs rollout to all processes; RLS/OIDC/fair scheduling remain future work.
+
+## 012 — Bounded reconciliation has its own ledger
+
+**Context:** execution state alone cannot record consumed lookup budget, deadline or operator
+resolution while preserving external uncertainty.
+**Decision:** an action-owned reconciliation row, attempts committed before GET, fenced claims,
+manual review on exhaustion, positive lookup resolution and audited unknown-effect abandonment.
+**Consequence:** automated recovery terminates; uncertainty may persist manually. No reset or
+compensation endpoint is introduced and a late external request cannot be cancelled locally.
+
+## 013 — One concrete provider contract with target-bound approval
+
+**Context:** generic HTTP fixtures cannot document a real non-idempotent provider contract.
+**Decision:** GitHub Issues, fixed origin, trusted actor/exact marker lookup, persisted
+repository/actor binding and normalized bounded responses. Deterministic contracts are the
+CI default; a single live write requires separate disposable-repository opt-in.
+**Consequence:** provider-specific limits are inspectable; live write behavior remains unverified
+until that optional test really passes. A marker is not provider-enforced exactly-once behavior.
+
+## 014 — Process metrics and database facts are distinct
+
+**Decision:** export every worker process separately and protect API process telemetry with
+infrastructure authority. Tenant DB gauges already cover all workers; do not sum duplicate
+replica scrapes.
+**Consequence:** fleet rates need external scraping/aggregation. No misleading global counter
+is synthesized from one API process and no deployed collector is claimed.
+
+## 015 — Restore is an operator safety boundary
+
+**Context:** a consistent backup can still omit dispatches whose effects happened later.
+**Decision:** backup/restore wrappers and a disposable SIGKILL/rollback/integrity/reconnect
+drill; read-only recovery mode before any restored worker claim. Verify original provider
+evidence and the snapshot loss window before dispatch resumes.
+**Consequence:** reproducible operational evidence without fake RPO/RTO guarantees. PITR/HA,
+production promotion and automatic missing-intent reconstruction are outside this revision.

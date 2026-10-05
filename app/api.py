@@ -19,12 +19,14 @@ from app.domain import (
     ExternalFault,
     Fault,
     HistoryView,
+    OperatorAction,
 )
+from app.identity import AuthContext, resolve_identity
 from app.observability import configure_logging, logger
 from app.runtime import Runtime
 from app.security import IngressLimits, authenticate, verify_webhook
 from app.services import services
-from app.tables import Execution
+from app.tables import Event, Execution
 
 
 def create_app(settings: Settings | None = None, runtime: Runtime | None = None) -> FastAPI:
@@ -47,17 +49,32 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         app.state.runtime = runtime
 
     def service(request: Request) -> Runtime:
-        return cast(Runtime, request.app.state.runtime)
+        instance = cast(Runtime, request.app.state.runtime)
+        context = getattr(request.state, "auth", None)
+        return instance.for_tenant(context.tenant_id) if context is not None else instance
 
     def api_auth(request: Request) -> None:
-        authenticate(request.headers.get("authorization"), config.api_key)
+        request.state.auth = resolve_identity(
+            request.headers.get("authorization"), "api", config.identities()
+        )
 
     def approval_auth(request: Request) -> None:
-        authenticate(request.headers.get("authorization"), config.approval_key)
+        request.state.auth = resolve_identity(
+            request.headers.get("authorization"), "approval", config.identities()
+        )
+
+    def operator_auth(request: Request) -> None:
+        request.state.auth = resolve_identity(
+            request.headers.get("authorization"), "operator", config.identities()
+        )
 
     def error(request: Request, code: str, status: int) -> JSONResponse:
         request_id = str(getattr(request.state, "request_id", uuid4()))
-        return JSONResponse({"error": {"code": code, "request_id": request_id}}, status_code=status)
+        return JSONResponse(
+            {"error": {"code": code, "request_id": request_id}},
+            status_code=status,
+            headers={"Retry-After": "60"} if status == 429 else None,
+        )
 
     @app.exception_handler(Fault)
     async def domain_error(request: Request, exc: Fault) -> JSONResponse:
@@ -68,6 +85,8 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         return error(request, "invalid_request", 422)
 
     @app.exception_handler(SQLAlchemyError)
+    @app.exception_handler(OSError)
+    @app.exception_handler(TimeoutError)
     async def database_error(request: Request, exc: SQLAlchemyError) -> JSONResponse:
         logger.error("database_unavailable", extra={"request_id": str(request.state.request_id)})
         return error(request, "database_unavailable", 503)
@@ -120,21 +139,27 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
 
     @app.get("/ready")
     async def ready(request: Request) -> dict[str, str]:
+        if config.recovery_read_only:
+            raise Fault("recovery_read_only", 503)
         async with service(request).store.sessions() as session:
             version = await session.scalar(text("SELECT version_num FROM alembic_version"))
-            if version != "0001":
+            if version != "0002":
                 raise Fault("schema_not_ready", 503)
-        if config.api_key is None or config.approval_key is None:
+        if not any(t.api_keys for t in config.identities()) or not any(
+            t.approval_keys for t in config.identities()
+        ):
             raise Fault("authentication_not_configured", 503)
         if config.model_provider == "openai" and (
             not config.openai_api_key or not config.openai_model
         ):
             raise Fault("model_configuration_missing", 503)
-        if config.allowed_tools:
-            try:
-                config.validate_tool_endpoint()
-            except ExternalFault as exc:
-                raise Fault(exc.code, 503) from exc
+        for tenant in config.identities():
+            for tool in tenant.allowed_tools:
+                try:
+                    service(request).registry.get(tool)
+                    service(request).tools.preflight(tool, tenant.id)
+                except ExternalFault as exc:
+                    raise Fault(exc.code, 503) from exc
         return {"status": "ready"}
 
     @app.post(
@@ -213,26 +238,72 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         dependencies=[Depends(approval_auth)],
     )
     async def approve(request: Request, call_id: UUID, decision: ApprovalDecision) -> ExecutionView:
+        context = cast(AuthContext, request.state.auth)
         execution_id = await service(request).store.decide_approval(
-            call_id, decision, "approval-key-holder"
+            call_id, decision, context.credential_id
         )
         return await service(request).store.get(execution_id)
 
-    @app.post("/webhooks", response_model=ExecutionView)
-    async def webhook(request: Request, body: CreateExecution) -> ExecutionView:
+    async def admit_webhook(
+        request: Request, body: CreateExecution, tenant_id: str
+    ) -> ExecutionView:
+        tenant = config.tenant(tenant_id)
         raw = await request.body()
-        nonce_hash = verify_webhook(
-            raw,
-            request.headers.get("x-timestamp"),
-            request.headers.get("x-nonce"),
-            request.headers.get("x-signature"),
-            config.webhook_secret,
-        )
+        nonce_hash = None
+        for secret in tenant.webhook_secrets:
+            try:
+                nonce_hash = verify_webhook(
+                    raw,
+                    request.headers.get("x-timestamp"),
+                    request.headers.get("x-nonce"),
+                    request.headers.get("x-signature"),
+                    secret,
+                )
+            except Fault:
+                continue
+        if nonce_hash is None:
+            # Keep legacy stable error classification, including unconfigured/expired signatures.
+            verify_webhook(
+                raw,
+                request.headers.get("x-timestamp"),
+                request.headers.get("x-nonce"),
+                request.headers.get("x-signature"),
+                tenant.webhook_secrets[0] if tenant.webhook_secrets else None,
+            )
+            raise Fault("webhook_signature_invalid", 401)
+        request.state.auth = AuthContext(tenant_id, "api", "signed-webhook")
         # Signed business identity supplies a stable idempotency key; unsigned headers cannot change it.
         execution_id, _ = await service(request).store.create(
             body, body.business_key, request.state.correlation_id, nonce_hash
         )
         return await service(request).store.get(execution_id)
+
+    @app.post("/webhooks", response_model=ExecutionView)
+    async def webhook(request: Request, body: CreateExecution) -> ExecutionView:
+        return await admit_webhook(request, body, "legacy")
+
+    @app.post("/webhooks/{tenant_id}", response_model=ExecutionView)
+    async def tenant_webhook(
+        request: Request, body: CreateExecution, tenant_id: str
+    ) -> ExecutionView:
+        return await admit_webhook(request, body, tenant_id)
+
+    @app.post(
+        "/executions/{execution_id}/operator",
+        response_model=ExecutionView,
+        dependencies=[Depends(operator_auth)],
+    )
+    async def operator(
+        request: Request, execution_id: UUID, action: OperatorAction
+    ) -> ExecutionView:
+        instance = service(request)
+        context = cast(AuthContext, request.state.auth)
+        actor = f"{context.tenant_id}:{context.credential_id}"
+        if action.action == "lookup":
+            await instance.reconcile(execution_id, f"operator-{request.state.request_id}", actor)
+        else:
+            await instance.store.abandon(execution_id, actor, action.reason)
+        return await instance.store.get(execution_id)
 
     @app.get("/metrics", dependencies=[Depends(api_auth)])
     async def metrics(request: Request) -> Response:
@@ -240,17 +311,35 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         async with instance.store.sessions() as session:
             states = (
                 await session.execute(
-                    select(Execution.state, func.count()).group_by(Execution.state)
+                    select(Execution.state, func.count())
+                    .where(instance.store._scope())
+                    .group_by(Execution.state)
                 )
             ).all()
+            dispatches = await session.scalar(
+                select(func.count())
+                .select_from(Event)
+                .join(Execution)
+                .where(instance.store._scope(), Event.kind == "dispatch_intent")
+            )
         gauges = (
             "# HELP runtime_executions Durable execution counts\n# TYPE runtime_executions gauge\n"
         )
         gauges += "".join(
             f'runtime_executions{{state="{state}"}} {count}\n' for state, count in states
         )
+        gauges += f"# HELP runtime_durable_dispatches Persisted dispatch intents for this tenant\n# TYPE runtime_durable_dispatches gauge\nruntime_durable_dispatches {dispatches}\n"
         return Response(
-            generate_latest(instance.metrics.registry) + gauges.encode(),
+            gauges.encode(),
+            headers={"Content-Type": CONTENT_TYPE_LATEST},
+        )
+
+    @app.get("/process-metrics")
+    async def process_metrics(request: Request) -> Response:
+        # Infrastructure process metrics are privileged independently of tenant API keys.
+        authenticate(request.headers.get("authorization"), config.operator_key)
+        return Response(
+            generate_latest(service(request).metrics.registry),
             headers={"Content-Type": CONTENT_TYPE_LATEST},
         )
 

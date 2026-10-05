@@ -2,7 +2,8 @@
 
 This review maps actual changes to executable evidence. It is a self-review, not an
 independent security audit or certification. Verification summaries retain exact source
-and tested commit identities; see [test evidence](../artifacts/test-summary.md).
+and tested commit identities; see [v2 evidence](../evidence/v2/README.md) and
+[the earlier v1 record](../artifacts/test-summary.md).
 
 | Gate | Finding / decision | Evidence |
 |---|---|---|
@@ -26,5 +27,29 @@ and tested commit identities; see [test evidence](../artifacts/test-summary.md).
 | Operations | Process-local metrics do not represent fleet activity | Explicit telemetry limitation and deployment follow-up |
 
 Remaining limitations are [listed separately](limitations.md), including provider lookup
-assumptions, no tenant isolation, no tested restore/HA, and no live model-quality evidence.
+assumptions, application-only tenant isolation, controlled restore rather than HA/PITR,
+and no live provider-write or model-quality evidence.
 They are not silently converted into implemented features by this review.
+
+## V2 red-team review
+
+| Attack or finding | Result / fix | Evidence |
+|---|---|---|
+| Cross-tenant execution/history/advance/cancel/lookup and approval/operator IDs | Denied before state/payload access; identical nonexistent response class | Tenant security suite |
+| Caller header tries to choose tenant; role/key reuse | Header ignored; server-bound identity, distinct secrets and roles | Tenant/config security tests |
+| Change GitHub target after approval | Fixed: persist repository/actor binding in action identity; reject changed dispatch/lookup | Provider-binding regression |
+| Timeout after provider commit or malformed/oversized/429 response | One write intent, no second POST; matching GET alone resolves | Native provider contracts + PostgreSQL runtime test |
+| Reconciliation process loss/double completion/operator race | Attempt survives loss; token fences completion; active lookup blocks abandonment | Lifecycle failure suite |
+| Queue flooding and duplicate admission at capacity | Tenant advisory lock serializes limits; duplicate converges without new admission quota | Twelve-connection contention test |
+| Poison model/output or exception after write | Pre-dispatch quarantine; post-write remains uncertain; next healthy job progresses | Lifecycle failure suite |
+| Database connection death and full SIGKILL | Fixed: compound IPv4/IPv6 refusal is OSError, now treated as unavailable; transactions are not blindly replayed | Worker regression, connection tests and CI drill |
+| Restore lost intent / stale pre-restore worker | Maintenance blocks claims; row integrity checked; old lease denied; independent lookup only | Recovery drill |
+| SIGTERM during committed effect | Drain completes that bounded operation and claims no next job | Real subprocess SIGTERM test |
+| Approval/webhook replay, stale writes, oversized ingress, invalid transitions | Existing regressions preserved and tenant scoped | Original security/concurrency/state suites |
+| Secrets in config-validation/SQL exception output | Hide validation inputs and SQL parameters; fixed log allowlist remains | Config/redaction tests and tracked-source scan |
+| CI deleted generated artifacts before secret check | Fixed: scan committed/staged Git blobs, so working-tree deletion cannot bypass the gate | Exact-head CI static gate |
+
+Unresolved boundaries are explicit: no live authenticated provider write/recovery observation,
+provider trust/window limits, shared privileged service/DB authority, no RLS/SSO, no full
+all-route gateway quota or deployed telemetry collector, no PITR/HA or automatic loss-window
+reconstruction. No unresolved critical finding is accepted as a production guarantee.

@@ -47,7 +47,7 @@ TRANSITIONS: dict[State, frozenset[State]] = {
         {State.CREATED, State.RETRY_PENDING, State.RECONCILIATION_REQUIRED, State.FAILED_PERMANENT}
     ),
     State.RETRY_PENDING: frozenset({State.RUNNING, State.CANCELLED, State.FAILED_PERMANENT}),
-    State.RECONCILIATION_REQUIRED: frozenset({State.CREATED}),
+    State.RECONCILIATION_REQUIRED: frozenset({State.CREATED, State.FAILED_PERMANENT}),
     State.SUCCEEDED: frozenset(),
     State.FAILED_PERMANENT: frozenset(),
     State.CANCELLED: frozenset(),
@@ -128,6 +128,7 @@ class ToolResult(Contract):
     fingerprint: str = Field(min_length=64, max_length=64)
     external_id: str = Field(min_length=1, max_length=128)
     value: str = Field(max_length=4000)
+    provider_request_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_:-]{1,128}$")
 
 
 class ReconcileResult(Contract):
@@ -153,10 +154,12 @@ class ActionView(Contract):
     arguments: JSON
     status: str
     approval_expires_at: datetime | None
+    provider_binding: str | None = None
 
 
 class ExecutionView(Contract):
     id: UUID
+    tenant_id: str = "legacy"
     business_key: str
     state: State
     correlation_id: UUID
@@ -169,6 +172,20 @@ class ExecutionView(Contract):
     outcome: JSON | None
     error_code: str | None
     action: ActionView | None
+    reconciliation: ReconciliationView | None = None
+
+
+class ReconciliationView(Contract):
+    status: str
+    attempts: int
+    budget: int
+    deadline_at: datetime
+    next_attempt_at: datetime
+
+
+class OperatorAction(Contract):
+    action: Literal["lookup", "abandon"]
+    reason: Literal["verification", "budget_exhausted", "deadline_exceeded", "operator_decision"]
 
 
 class EventView(Contract):
@@ -192,6 +209,7 @@ class Lease:
     token: UUID
     owner: str
     correlation_id: UUID
+    tenant_id: str = "legacy"
 
 
 @dataclass(frozen=True)
@@ -211,3 +229,5 @@ class Dispatch:
     fingerprint: str
     operation_key: str
     attempt: int
+    tenant_id: str = "legacy"
+    provider_binding: str | None = None

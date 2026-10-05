@@ -33,6 +33,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
@@ -51,6 +52,7 @@ jobs:
           uv run --locked ruff format --check .
           uv run --locked ruff check .
           uv run --locked mypy app
+          uv run --locked python scripts/check_secrets.py
       - name: Migration from empty database and downgrade roundtrip
         run: |
           uv run --locked alembic upgrade head
@@ -61,11 +63,18 @@ jobs:
       - name: All tests on PostgreSQL
         run: |
           mkdir -p artifacts
-          uv run --locked pytest --cov=app --cov-report=term-missing --cov-report=json:artifacts/coverage.json --junitxml=artifacts/junit.xml
+          uv run --locked pytest --cov=app --cov-fail-under=87 --cov-report=term-missing --cov-report=json:artifacts/coverage.json --junitxml=artifacts/junit.xml
       - name: Deterministic evals and measured admission benchmark
         run: |
           uv run --locked python -m evals.run
           uv run --locked python -m benchmarks.admission
+      - name: Record optional live provider status without credentials or writes
+        run: uv run --locked pytest provider_checks/test_github_live.py --junitxml=artifacts/optional-provider.xml
+      - name: Real database SIGKILL, reconnect and isolated backup restore
+        env:
+          POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
+          RUNTIME_RECOVERY_DRILL: '1'
+        run: uv run --locked python scripts/recovery_drill.py
       - name: Render evidence summaries
         if: always()
         run: uv run --locked python scripts/report.py
@@ -89,6 +98,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Bootstrap unique local keys
         run: python3 scripts/bootstrap.py
       - name: Build and start complete stack
@@ -96,7 +106,9 @@ jobs:
           docker compose build api
           docker compose up -d --wait --wait-timeout 120 --no-build
       - name: Exercise real TCP API and worker
-        run: python3 scripts/smoke.py
+        run: |
+          python3 scripts/smoke.py
+          docker compose exec -T worker python -c "import urllib.request; data=urllib.request.urlopen('http://127.0.0.1:9101/metrics').read(); assert b'runtime_tool_calls_total' in data and b'runtime_advances_total' in data; print('Worker process metrics exporter passed')"
       - name: Diagnose failed stack
         if: failure()
         run: docker compose logs --no-color --tail 80

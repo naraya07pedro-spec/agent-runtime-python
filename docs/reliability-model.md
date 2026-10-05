@@ -4,7 +4,7 @@
 
 The caller must preserve the business key and Idempotency-Key across delivery
 retries. The canonical request digest includes the prompt and execution bounds.
-Both keys are uniquely constrained. Same keys and payload return the existing
+Both keys are uniquely constrained within the authenticated tenant. Same keys and payload return the existing
 execution; reusing either identity for a conflicting request returns 409. Replacing
 the idempotency key while retaining the business key also returns 409.
 
@@ -17,7 +17,8 @@ not an implemented deduplication guarantee.
 
 Each validated proposal binds tool name, canonical arguments, effect classification,
 approval requirement, and contract version into a fingerprint. An operation key
-binds that fingerprint to the execution's business key. Repeating an identical
+binds that fingerprint to the tenant and business key (legacy v1 operation keys stay unchanged).
+GitHub proposals additionally fingerprint their server-owned repository/actor binding. Repeating an identical
 action in a later model turn is denied. Retry uses the same persisted call and key.
 
 The tool schema and permission are checked again before a pending action dispatches.
@@ -47,7 +48,9 @@ produce an effect. A database lease fences database mutations, not remote HTTP.
 The late-worker test controls this exact schedule with two asyncio events. A positive
 result from the old worker is rejected by its stale token; the new reconciler later
 records the provider's already-completed operation. An unresolved action may remain
-stuck indefinitely. That loss of availability is intentional.
+in MANUAL_REVIEW indefinitely after its automatic budget/deadline. An operator may
+end local scheduling with an explicit unknown-effect outcome; that is not cancellation.
+The availability sacrifice is intentional.
 
 ## Guarantees and assumptions
 
@@ -69,5 +72,7 @@ stuck indefinitely. That loss of availability is intentional.
 The worker automatically recovers expired leases. `POST /executions/{id}/reconcile`
 performs a bounded provider lookup; it never accepts a caller-supplied success result
 or a force-retry option. Provider lookup must retain identity long enough for recovery.
-If the provider cannot prove an outcome, an operator must investigate outside this
-runtime. Deleting the row and creating a new key is not a supported recovery procedure.
+Automatic due lookups consume a persistent budget; exhaustion/deadline enters manual
+review. An operator can explicitly perform one verification or abandon local scheduling,
+with no unverified success input or write replay. See [lifecycle](reconciliation.md).
+If the provider cannot prove an outcome, independent investigation is still required. Deleting the row and creating a new key is not a supported recovery procedure.

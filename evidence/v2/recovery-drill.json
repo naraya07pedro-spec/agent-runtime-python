@@ -1,0 +1,28 @@
+{
+  "label": "SYNTHETIC DISPOSABLE DATABASE RECOVERY DRILL",
+  "source_sha": "833a4eff040bea8b952e84d9b5207c2335c036c2",
+  "provider_is_sandbox": true,
+  "backup_seconds": 0.1245,
+  "backup_bytes": 76834,
+  "interrupted_transaction_rejected": true,
+  "outage_rejected": true,
+  "restart_reconnect_seconds": 0.631,
+  "uncommitted_update_rolled_back": true,
+  "snapshot_row_integrity": true,
+  "table_rows": {
+    "executions": 334,
+    "tool_calls": 3,
+    "approvals": 1,
+    "execution_events": 386,
+    "webhook_receipts": 0,
+    "reconciliations": 0,
+    "sandbox_external_effects": 1
+  },
+  "restore_claim_blocked": true,
+  "stale_pre_restore_worker_rejected": true,
+  "external_effects_for_seed": 1,
+  "restore_verification_seconds": 0.2352,
+  "provider_replay_after_restore": false,
+  "rpo_rto_guarantee": false,
+  "status": "passed"
+}

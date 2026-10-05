@@ -49,10 +49,15 @@ class Execution(Base):
         ),
         Index("ix_execution_ready", "state", "next_attempt_at"),
         Index("ix_execution_stale", "state", "lease_expires_at"),
+        Index("ix_execution_tenant_created", "tenant_id", "created_at"),
+        UniqueConstraint("tenant_id", "business_key", name="uq_tenant_business"),
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_tenant_idempotency"),
+        CheckConstraint("tenant_id ~ '^[A-Za-z0-9_.-]{1,64}$'", name="valid_tenant_id"),
     )
     id: Mapped[UUID] = mapped_column(primary_key=True)
-    business_key: Mapped[str] = mapped_column(String(128), unique=True)
-    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), server_default="legacy")
+    business_key: Mapped[str] = mapped_column(String(128))
+    idempotency_key: Mapped[str] = mapped_column(String(128))
     request_digest: Mapped[str] = mapped_column(String(64))
     prompt: Mapped[str] = mapped_column(Text)
     state: Mapped[str] = mapped_column(String(32))
@@ -93,6 +98,7 @@ class ToolCall(Base):
     execution_id: Mapped[UUID] = mapped_column(ForeignKey("executions.id", ondelete="CASCADE"))
     ordinal: Mapped[int] = mapped_column(Integer)
     tool: Mapped[str] = mapped_column(String(80))
+    provider_binding: Mapped[str | None] = mapped_column(String(256))
     fingerprint: Mapped[str] = mapped_column(String(64))
     operation_key: Mapped[str] = mapped_column(String(64), unique=True)
     arguments: Mapped[JSON] = mapped_column(JSONB)
@@ -142,5 +148,26 @@ class Event(Base):
 class WebhookReceipt(Base):
     __tablename__ = "webhook_receipts"
     __table_args__ = (Index("ix_receipt_expiry", "expires_at"),)
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True, server_default="legacy")
     nonce_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Reconciliation(Base):
+    __tablename__ = "reconciliations"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('AMBIGUOUS','RECONCILING','MANUAL_REVIEW','RESOLVED','ABANDONED')",
+            name="reconciliation_status",
+        ),
+        CheckConstraint("attempts >= 0 AND budget > 0", name="reconciliation_budget"),
+        Index("ix_reconciliation_due", "status", "next_attempt_at"),
+    )
+    call_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tool_calls.id", ondelete="CASCADE"), primary_key=True
+    )
+    status: Mapped[str] = mapped_column(String(24))
+    attempts: Mapped[int] = mapped_column(Integer)
+    budget: Mapped[int] = mapped_column(Integer)
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

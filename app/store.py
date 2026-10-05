@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, text, true
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.config import Settings
 from app.domain import (
     JSON,
+    TERMINAL,
     ActionView,
     ApprovalDecision,
     CreateExecution,
@@ -18,6 +22,7 @@ from app.domain import (
     Fault,
     HistoryView,
     Lease,
+    ReconciliationView,
     State,
     ToolResult,
     Usage,
@@ -25,20 +30,27 @@ from app.domain import (
     check_transition,
     fingerprint,
 )
-from app.tables import Approval, Event, Execution, ToolCall, WebhookReceipt
+from app.tables import Approval, Event, Execution, Reconciliation, ToolCall, WebhookReceipt
 from app.tools import ToolSpec
 
 
-def action_digest(tool: str, arguments: JSON, side_effect: str, approval: bool) -> str:
-    return fingerprint(
-        {
-            "tool": tool,
-            "arguments": arguments,
-            "side_effect": side_effect,
-            "approval_required": approval,
-            "contract_version": 1,
-        }
-    )
+def action_digest(
+    tool: str,
+    arguments: JSON,
+    side_effect: str,
+    approval: bool,
+    provider_binding: str | None = None,
+) -> str:
+    identity: JSON = {
+        "tool": tool,
+        "arguments": arguments,
+        "side_effect": side_effect,
+        "approval_required": approval,
+        "contract_version": 1,
+    }
+    if provider_binding is not None:
+        identity.update({"contract_version": 2, "provider_binding": provider_binding})
+    return fingerprint(identity)
 
 
 def no_fault(stage: str) -> None:
@@ -51,10 +63,28 @@ class Store:
         sessions: async_sessionmaker[AsyncSession],
         settings: Settings,
         fault: Callable[[str], None] = no_fault,
+        *,
+        tenant_id: str | None = "legacy",
     ) -> None:
         self.sessions = sessions
         self.settings = settings
         self.fault = fault
+        self.tenant_id = tenant_id
+
+    def for_tenant(self, tenant_id: str) -> Store:
+        self.settings.tenant(tenant_id)
+        return Store(self.sessions, self.settings, self.fault, tenant_id=tenant_id)
+
+    def _scope(self) -> ColumnElement[bool]:
+        return Execution.tenant_id == self.tenant_id if self.tenant_id is not None else true()
+
+    async def _read(self, session: AsyncSession, execution_id: UUID) -> Execution:
+        row = await session.scalar(
+            select(Execution).where(Execution.id == execution_id, self._scope())
+        )
+        if row is None:
+            raise Fault("execution_not_found", 404)
+        return row
 
     @staticmethod
     async def _now(session: AsyncSession) -> datetime:
@@ -62,10 +92,9 @@ class Store:
         assert isinstance(now, datetime)
         return now
 
-    @staticmethod
-    async def _locked(session: AsyncSession, execution_id: UUID) -> Execution:
+    async def _locked(self, session: AsyncSession, execution_id: UUID) -> Execution:
         row = await session.scalar(
-            select(Execution).where(Execution.id == execution_id).with_for_update()
+            select(Execution).where(Execution.id == execution_id, self._scope()).with_for_update()
         )
         if row is None:
             raise Fault("execution_not_found", 404)
@@ -75,7 +104,8 @@ class Store:
         row = await self._locked(session, lease.execution_id)
         now = await self._now(session)
         if (
-            row.lease_token != lease.token
+            row.tenant_id != lease.tenant_id
+            or row.lease_token != lease.token
             or row.lease_owner != lease.owner
             or row.lease_expires_at is None
             or row.lease_expires_at <= now
@@ -151,23 +181,72 @@ class Store:
         correlation_id: UUID,
         nonce_hash: str | None = None,
     ) -> tuple[UUID, bool]:
+        if self.settings.recovery_read_only:
+            raise Fault("recovery_read_only", 503)
         digest = fingerprint(request.model_dump(mode="json"))
+        if self.tenant_id is None:
+            raise Fault("tenant_context_required", 403)
         candidate = uuid4()
         async with self.sessions.begin() as session:
+            # The lock serializes only admissions for this tenant across API processes.
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:tenant, 73019))"),
+                {"tenant": self.tenant_id},
+            )
             now = await self._now(session)
             if nonce_hash:
                 receipt = await session.scalar(
                     insert(WebhookReceipt)
-                    .values(nonce_hash=nonce_hash, expires_at=now + timedelta(seconds=610))
+                    .values(
+                        tenant_id=self.tenant_id,
+                        nonce_hash=nonce_hash,
+                        expires_at=now + timedelta(seconds=610),
+                    )
                     .on_conflict_do_nothing()
                     .returning(WebhookReceipt.nonce_hash)
                 )
                 if receipt is None:
                     raise Fault("webhook_replay")
+            existing = list(
+                (
+                    await session.scalars(
+                        select(Execution).where(
+                            self._scope(),
+                            or_(
+                                Execution.idempotency_key == key,
+                                Execution.business_key == request.business_key,
+                            ),
+                        )
+                    )
+                ).all()
+            )
+            if existing:
+                if (
+                    len(existing) != 1
+                    or existing[0].request_digest != digest
+                    or existing[0].idempotency_key != key
+                ):
+                    raise Fault("idempotency_conflict")
+                return existing[0].id, False
+            pending = await session.scalar(
+                select(func.count())
+                .select_from(Execution)
+                .where(self._scope(), Execution.state.not_in([s.value for s in TERMINAL]))
+            )
+            if pending is not None and pending >= self.settings.tenant_queue_capacity:
+                raise Fault("tenant_queue_full", 429)
+            admissions = await session.scalar(
+                select(func.count())
+                .select_from(Execution)
+                .where(self._scope(), Execution.created_at > now - timedelta(seconds=60))
+            )
+            if admissions is not None and admissions >= self.settings.tenant_admissions_per_minute:
+                raise Fault("tenant_admission_rate_limited", 429)
             inserted = await session.scalar(
                 insert(Execution)
                 .values(
                     id=candidate,
+                    tenant_id=self.tenant_id,
                     business_key=request.business_key,
                     idempotency_key=key,
                     request_digest=digest,
@@ -194,10 +273,11 @@ class Store:
                 (
                     await session.scalars(
                         select(Execution).where(
+                            self._scope(),
                             or_(
                                 Execution.idempotency_key == key,
                                 Execution.business_key == request.business_key,
-                            )
+                            ),
                         )
                     )
                 ).all()
@@ -208,9 +288,7 @@ class Store:
 
     async def get(self, execution_id: UUID) -> ExecutionView:
         async with self.sessions() as session:
-            row = await session.get(Execution, execution_id)
-            if row is None:
-                raise Fault("execution_not_found", 404)
+            row = await self._read(session, execution_id)
             call = await session.scalar(
                 select(ToolCall)
                 .where(
@@ -220,6 +298,13 @@ class Store:
                 .limit(1)
             )
             approval = await session.get(Approval, call.id) if call else None
+            recovery = await session.scalar(
+                select(Reconciliation)
+                .join(ToolCall)
+                .where(ToolCall.execution_id == row.id)
+                .order_by(ToolCall.ordinal.desc())
+                .limit(1)
+            )
             action = (
                 ActionView(
                     id=call.id,
@@ -228,12 +313,14 @@ class Store:
                     arguments=call.arguments,
                     status=call.status,
                     approval_expires_at=approval.expires_at if approval else None,
+                    provider_binding=call.provider_binding,
                 )
                 if call
                 else None
             )
             return ExecutionView(
                 id=row.id,
+                tenant_id=row.tenant_id,
                 business_key=row.business_key,
                 state=State(row.state),
                 correlation_id=row.correlation_id,
@@ -246,12 +333,20 @@ class Store:
                 outcome=row.outcome,
                 error_code=row.error_code,
                 action=action,
+                reconciliation=ReconciliationView(
+                    status=recovery.status,
+                    attempts=recovery.attempts,
+                    budget=recovery.budget,
+                    deadline_at=recovery.deadline_at,
+                    next_attempt_at=recovery.next_attempt_at,
+                )
+                if recovery
+                else None,
             )
 
     async def history(self, execution_id: UUID, cursor: int = 0, limit: int = 100) -> HistoryView:
         async with self.sessions() as session:
-            if await session.get(Execution, execution_id) is None:
-                raise Fault("execution_not_found", 404)
+            await self._read(session, execution_id)
             events = list(
                 (
                     await session.scalars(
@@ -279,11 +374,14 @@ class Store:
             )
 
     async def claim(self, owner: str, execution_id: UUID | None = None) -> Work | None:
+        if self.settings.recovery_read_only:
+            raise Fault("recovery_read_only", 503)
         async with self.sessions.begin() as session:
             now = await self._now(session)
             query = (
                 select(Execution)
                 .where(
+                    self._scope(),
                     Execution.state.in_([State.CREATED.value, State.RETRY_PENDING.value]),
                     or_(Execution.next_attempt_at.is_(None), Execution.next_attempt_at <= now),
                     Execution.lease_token.is_(None),
@@ -319,7 +417,7 @@ class Store:
                 {"tool": c.tool, "result": c.outcome} for c in calls if c.status == "SUCCEEDED"
             )
             return Work(
-                Lease(row.id, row.lease_token, owner, row.correlation_id),
+                Lease(row.id, row.lease_token, owner, row.correlation_id, row.tenant_id),
                 row.prompt,
                 row.max_tokens - row.tokens_used,
                 observations,
@@ -363,7 +461,9 @@ class Store:
             self._release(row)
 
     async def propose(self, lease: Lease, spec: ToolSpec, arguments: JSON) -> UUID | None:
-        digest = action_digest(spec.name, arguments, spec.side_effect, spec.approval)
+        digest = action_digest(
+            spec.name, arguments, spec.side_effect, spec.approval, spec.provider_binding
+        )
         async with self.sessions.begin() as session:
             row = await self._fenced(session, lease)
             if row.steps >= row.max_steps:
@@ -383,8 +483,18 @@ class Store:
                 execution_id=row.id,
                 ordinal=row.steps,
                 tool=spec.name,
+                provider_binding=spec.provider_binding,
                 fingerprint=digest,
-                operation_key=fingerprint({"business_key": row.business_key, "action": digest}),
+                # Preserve v1 legacy operation identities through migration/restore.
+                operation_key=fingerprint(
+                    {"business_key": row.business_key, "action": digest}
+                    if row.tenant_id == "legacy"
+                    else {
+                        "tenant_id": row.tenant_id,
+                        "business_key": row.business_key,
+                        "action": digest,
+                    }
+                ),
                 arguments=arguments,
                 side_effect=spec.side_effect,
                 approval_required=spec.approval,
@@ -418,15 +528,25 @@ class Store:
 
     async def inspect_call(self, call_id: UUID) -> Dispatch:
         async with self.sessions() as session:
-            call = await session.get(ToolCall, call_id)
+            call = await session.scalar(
+                select(ToolCall).join(Execution).where(ToolCall.id == call_id, self._scope())
+            )
             if call is None:
                 raise Fault("action_not_found", 404)
-            return self._dispatch_view(call)
+            row = await self._read(session, call.execution_id)
+            return self._dispatch_view(call, row.tenant_id)
 
     @staticmethod
-    def _dispatch_view(call: ToolCall) -> Dispatch:
+    def _dispatch_view(call: ToolCall, tenant_id: str = "legacy") -> Dispatch:
         return Dispatch(
-            call.id, call.tool, call.arguments, call.fingerprint, call.operation_key, call.attempt
+            call.id,
+            call.tool,
+            call.arguments,
+            call.fingerprint,
+            call.operation_key,
+            call.attempt,
+            tenant_id,
+            call.provider_binding,
         )
 
     async def dispatch(self, lease: Lease, call_id: UUID, spec: ToolSpec) -> Dispatch:
@@ -435,12 +555,15 @@ class Store:
             call = await session.get(ToolCall, call_id)
             if call is None or call.execution_id != row.id or call.status != "PROPOSED":
                 raise Fault("action_not_dispatchable")
-            digest = action_digest(spec.name, call.arguments, spec.side_effect, spec.approval)
+            digest = action_digest(
+                spec.name, call.arguments, spec.side_effect, spec.approval, spec.provider_binding
+            )
             if (
                 call.fingerprint != digest
                 or call.tool != spec.name
                 or call.approval_required != spec.approval
                 or call.side_effect != spec.side_effect
+                or call.provider_binding != spec.provider_binding
             ):
                 raise Fault("action_fingerprint_changed")
             now = await self._now(session)
@@ -463,7 +586,7 @@ class Store:
                 details={"tool": spec.name, "attempt": call.attempt},
             )
             self.fault("before_dispatch_commit")
-            return self._dispatch_view(call)
+            return self._dispatch_view(call, row.tenant_id)
 
     async def complete_tool(
         self, lease: Lease, call_id: UUID, result: ToolResult, reconciliation: bool = False
@@ -484,6 +607,11 @@ class Store:
             call.status = "SUCCEEDED"
             call.outcome = result.model_dump(mode="json")
             call.external_id = result.external_id
+            if reconciliation:
+                recovery = await session.get(Reconciliation, call_id)
+                if recovery is None or recovery.status != "RECONCILING":
+                    raise Fault("reconciliation_not_claimed")
+                recovery.status = "RESOLVED"
             row.retry_count = 0
             row.error_code = None
             self._move(
@@ -501,6 +629,8 @@ class Store:
         async with self.sessions.begin() as session:
             row = await self._fenced(session, lease)
             call = await session.get(ToolCall, call_id) if call_id else None
+            if call and call.execution_id != row.id:
+                raise Fault("action_not_found", 404)
             self._fail(session, row, code, call)
 
     async def retry(
@@ -509,6 +639,8 @@ class Store:
         async with self.sessions.begin() as session:
             row = await self._fenced(session, lease)
             call = await session.get(ToolCall, call_id) if call_id else None
+            if call and call.execution_id != row.id:
+                raise Fault("action_not_found", 404)
             if call and call.side_effect != "read":
                 raise Fault("write_retry_denied")
             now = await self._now(session)
@@ -536,6 +668,10 @@ class Store:
     async def require_reconciliation(self, lease: Lease, call_id: UUID, code: str) -> None:
         async with self.sessions.begin() as session:
             row = await self._fenced(session, lease)
+            call = await session.get(ToolCall, call_id)
+            if call is None or call.execution_id != row.id or call.status != "DISPATCHED":
+                raise Fault("action_not_found", 404)
+            await self._ensure_reconciliation(session, call)
             row.error_code = code
             self._move(
                 session,
@@ -550,9 +686,12 @@ class Store:
 
     async def decide_approval(self, call_id: UUID, decision: ApprovalDecision, actor: str) -> UUID:
         async with self.sessions.begin() as session:
-            call = await session.get(ToolCall, call_id)
+            call = await session.scalar(
+                select(ToolCall).join(Execution).where(ToolCall.id == call_id, self._scope())
+            )
             if call is None:
                 raise Fault("action_not_found", 404)
+            # Scope is checked before a caller can observe approval state or payload.
             row = await self._locked(session, call.execution_id)
             approval = await session.get(Approval, call_id)
             if (
@@ -563,7 +702,11 @@ class Store:
                 raise Fault("approval_not_pending")
             now = await self._now(session)
             digest = action_digest(
-                call.tool, call.arguments, call.side_effect, call.approval_required
+                call.tool,
+                call.arguments,
+                call.side_effect,
+                call.approval_required,
+                call.provider_binding,
             )
             if (
                 decision.fingerprint != digest
@@ -600,6 +743,7 @@ class Store:
                     await session.scalars(
                         select(Execution)
                         .where(
+                            self._scope(),
                             Execution.state.in_([State.RUNNING.value, State.TOOL_EXECUTING.value]),
                             Execution.lease_expires_at <= now,
                         )
@@ -616,6 +760,7 @@ class Store:
                     )
                 )
                 if call and call.side_effect != "read":
+                    await self._ensure_reconciliation(session, call)
                     row.error_code = "lease_expired_after_dispatch"
                     self._move(
                         session,
@@ -647,6 +792,7 @@ class Store:
                         .join(ToolCall, ToolCall.execution_id == Execution.id)
                         .join(Approval, Approval.call_id == ToolCall.id)
                         .where(
+                            self._scope(),
                             Execution.state == State.WAITING_FOR_APPROVAL.value,
                             or_(Approval.expires_at <= now, Execution.deadline_at <= now),
                         )
@@ -657,15 +803,71 @@ class Store:
             )
             for row in expired:
                 self._fail(session, row, "approval_expired")
-            await session.execute(delete(WebhookReceipt).where(WebhookReceipt.expires_at < now))
+            receipts = delete(WebhookReceipt).where(WebhookReceipt.expires_at < now)
+            if self.tenant_id is not None:
+                receipts = receipts.where(WebhookReceipt.tenant_id == self.tenant_id)
+            await session.execute(receipts)
             return len(rows) + len(expired)
 
+    async def _ensure_reconciliation(self, session: AsyncSession, call: ToolCall) -> None:
+        now = await self._now(session)
+        await session.execute(
+            insert(Reconciliation)
+            .values(
+                call_id=call.id,
+                status="AMBIGUOUS",
+                attempts=0,
+                budget=self.settings.reconciliation_attempts,
+                deadline_at=now + timedelta(seconds=self.settings.reconciliation_seconds),
+                next_attempt_at=now,
+            )
+            .on_conflict_do_nothing()
+        )
+
+    def _manual_review(
+        self, session: AsyncSession, row: Execution, recovery: Reconciliation, code: str
+    ) -> None:
+        recovery.status = "MANUAL_REVIEW"
+        row.error_code = code
+        self._event(
+            session,
+            row,
+            "manual_review_required",
+            call_id=recovery.call_id,
+            details={"error_class": code, "attempts": recovery.attempts},
+        )
+        self._release(row)
+
     async def claim_reconciliation(
-        self, execution_id: UUID, owner: str
+        self, execution_id: UUID | None, owner: str, operator_actor: str | None = None
     ) -> tuple[Lease, Dispatch] | None:
         async with self.sessions.begin() as session:
-            row = await self._locked(session, execution_id)
             now = await self._now(session)
+            if execution_id is not None:
+                row = await self._locked(session, execution_id)
+            else:
+                candidate = await session.scalar(
+                    select(Execution)
+                    .join(ToolCall)
+                    .join(Reconciliation)
+                    .where(
+                        self._scope(),
+                        Execution.state == State.RECONCILIATION_REQUIRED.value,
+                        Reconciliation.status.in_(["AMBIGUOUS", "RECONCILING"]),
+                        or_(
+                            Reconciliation.next_attempt_at <= now, Reconciliation.deadline_at <= now
+                        ),
+                        or_(
+                            Execution.lease_expires_at.is_(None), Execution.lease_expires_at <= now
+                        ),
+                    )
+                    .order_by(Reconciliation.next_attempt_at)
+                    .limit(1)
+                    .with_for_update(of=Execution, skip_locked=True)
+                )
+                if candidate is None:
+                    return None
+                row = candidate
             if row.state != State.RECONCILIATION_REQUIRED:
                 raise Fault("reconciliation_not_required")
             if row.lease_expires_at and row.lease_expires_at > now:
@@ -677,19 +879,95 @@ class Store:
             )
             if call is None:
                 raise Fault("reconciliation_action_missing")
+            recovery = await session.get(Reconciliation, call.id)
+            if recovery is None:
+                raise Fault("reconciliation_lifecycle_missing")
+            if recovery.status in {"RESOLVED", "ABANDONED"}:
+                raise Fault("reconciliation_terminal")
+            if not operator_actor:
+                if recovery.status == "MANUAL_REVIEW":
+                    return None
+                if recovery.attempts >= recovery.budget or recovery.deadline_at <= now:
+                    self._manual_review(session, row, recovery, "reconciliation_budget_or_deadline")
+                    return None
+                if recovery.next_attempt_at > now:
+                    return None
+            recovery.status = "RECONCILING"
+            recovery.attempts += 1
             row.lease_token = uuid4()
             row.lease_owner = owner
             row.lease_expires_at = now + timedelta(seconds=self.settings.lease_seconds)
-            self._event(session, row, "reconciliation_claimed", call_id=call.id)
-            return Lease(row.id, row.lease_token, owner, row.correlation_id), self._dispatch_view(
-                call
+            self._event(
+                session,
+                row,
+                "reconciliation_claimed",
+                call_id=call.id,
+                details={"attempt": recovery.attempts, "operator": operator_actor},
             )
+            return Lease(
+                row.id, row.lease_token, owner, row.correlation_id, row.tenant_id
+            ), self._dispatch_view(call, row.tenant_id)
 
-    async def release_reconciliation(self, lease: Lease, code: str) -> None:
+    async def release_reconciliation(
+        self, lease: Lease, code: str, operator_actor: str | None = None
+    ) -> None:
         async with self.sessions.begin() as session:
             row = await self._fenced(session, lease)
+            recovery = await session.scalar(
+                select(Reconciliation)
+                .join(ToolCall)
+                .where(ToolCall.execution_id == row.id, Reconciliation.status == "RECONCILING")
+            )
+            if recovery is None or row.state != State.RECONCILIATION_REQUIRED:
+                raise Fault("reconciliation_not_claimed")
+            now = await self._now(session)
             row.error_code = code
             self._event(session, row, "reconciliation_unresolved", details={"error_class": code})
+            if (
+                operator_actor
+                or recovery.attempts >= recovery.budget
+                or recovery.deadline_at <= now
+            ):
+                self._manual_review(session, row, recovery, code)
+            else:
+                recovery.status = "AMBIGUOUS"
+                recovery.next_attempt_at = now + timedelta(
+                    seconds=min(
+                        300,
+                        self.settings.reconciliation_backoff_seconds * 2 ** (recovery.attempts - 1),
+                    )
+                )
+                self._release(row)
+
+    async def abandon(self, execution_id: UUID, actor: str, reason: str) -> None:
+        async with self.sessions.begin() as session:
+            row = await self._locked(session, execution_id)
+            now = await self._now(session)
+            if row.state != State.RECONCILIATION_REQUIRED:
+                raise Fault("reconciliation_not_required")
+            if row.lease_expires_at and row.lease_expires_at > now:
+                raise Fault("reconciliation_in_progress")
+            recovery = await session.scalar(
+                select(Reconciliation)
+                .join(ToolCall)
+                .where(
+                    ToolCall.execution_id == row.id,
+                    Reconciliation.status.in_(["AMBIGUOUS", "RECONCILING", "MANUAL_REVIEW"]),
+                )
+            )
+            if recovery is None:
+                raise Fault("reconciliation_lifecycle_missing")
+            recovery.status = "ABANDONED"
+            row.outcome = {"operator_abandoned": True, "effect_unknown": True}
+            row.error_code = "external_effect_unknown"
+            self._move(
+                session,
+                row,
+                State.FAILED_PERMANENT,
+                "operator_abandoned",
+                call_id=recovery.call_id,
+                details={"actor": actor, "reason": reason},
+            )
             self._release(row)
 
     async def cancel(self, execution_id: UUID) -> None:

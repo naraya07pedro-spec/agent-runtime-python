@@ -1,0 +1,41 @@
+name: Optional single live provider contract
+on:
+  workflow_dispatch:
+    inputs:
+      acknowledge_synthetic_issue:
+        description: 'Create one synthetic issue in the separately configured disposable repository'
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  provider-contract:
+    if: inputs.acknowledge_synthetic_issue
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.19'
+      - run: uv sync --locked
+      - name: One synthetic issue; never retry uncertain creation
+        env:
+          RUNTIME_RUN_LIVE_PROVIDER: '1'
+          RUNTIME_LIVE_PROVIDER_WRITE_ACK: disposable-repository
+          RUNTIME_GITHUB_TOKEN: ${{ secrets.GITHUB_PROVIDER_TEST_TOKEN }}
+          RUNTIME_GITHUB_REPOSITORY: ${{ vars.GITHUB_PROVIDER_TEST_REPOSITORY }}
+          RUNTIME_GITHUB_ACTOR: ${{ vars.GITHUB_PROVIDER_TEST_ACTOR }}
+        run: uv run --locked pytest provider_checks/test_github_live.py -v --junitxml=artifacts/optional-provider.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: optional-live-provider-${{ github.sha }}
+          path: artifacts/optional-provider.xml

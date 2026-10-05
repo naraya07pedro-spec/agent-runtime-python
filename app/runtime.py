@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import time
 from uuid import UUID
@@ -24,6 +26,20 @@ class Runtime:
     ) -> None:
         self.store, self.provider, self.registry = store, provider, registry
         self.tools, self.metrics = tools, metrics
+
+    def for_tenant(self, tenant_id: str) -> Runtime:
+        if self.store.tenant_id == tenant_id:
+            return self
+        return Runtime(
+            self.store.for_tenant(tenant_id),
+            self.provider,
+            Registry(
+                self.store.settings.tenant(tenant_id).allowed_tools,
+                self.store.settings.tool_timeout,
+            ),
+            self.tools,
+            self.metrics,
+        )
 
     async def _external_failure(
         self,
@@ -57,6 +73,15 @@ class Runtime:
         spec: ToolSpec | None = None
         dispatched = False
         try:
+            tenant = self.store.settings.tenant(lease.tenant_id)
+            registry = Registry(
+                self.registry.allowed
+                if self.store.tenant_id == lease.tenant_id
+                else tenant.allowed_tools,
+                self.store.settings.tool_timeout,
+                tenant.github_repository,
+                self.store.settings.github_actor,
+            )
             if call_id is None:
                 if not await self.store.start_model(lease):
                     return lease.execution_id
@@ -65,7 +90,7 @@ class Runtime:
                         await self.provider.decide(
                             work.prompt,
                             work.observations,
-                            self.registry.schemas(),
+                            registry.schemas(),
                             work.remaining_tokens,
                         )
                     )
@@ -77,17 +102,17 @@ class Runtime:
                     await self.store.finish(lease, decision.text, refused=decision.kind == "refuse")
                     return lease.execution_id
                 assert decision.tool is not None
-                spec = self.registry.get(decision.tool)
+                spec = registry.get(decision.tool)
                 arguments = spec.validate(decision.arguments)
-                self.tools.preflight()
+                self.tools.preflight(spec.name, lease.tenant_id)
                 call_id = await self.store.propose(lease, spec, arguments)
                 if call_id is None:
                     return lease.execution_id
             else:
                 call = await self.store.inspect_call(call_id)
-                spec = self.registry.get(call.tool)
+                spec = registry.get(call.tool)
                 spec.validate(call.arguments)
-                self.tools.preflight()
+                self.tools.preflight(spec.name, lease.tenant_id)
             assert spec is not None
             call = await self.store.dispatch(lease, call_id, spec)
             dispatched = True
@@ -120,7 +145,11 @@ class Runtime:
                 dispatched,
             )
         except ValidationError:
-            await self.store.fail(lease, "model_response_invalid", call_id)
+            if dispatched and spec and spec.side_effect != "read":
+                assert call_id is not None
+                await self.store.require_reconciliation(lease, call_id, "tool_response_invalid")
+            else:
+                await self.store.fail(lease, "model_response_invalid", call_id)
         except Fault as exc:
             if exc.code == "stale_lease":
                 raise
@@ -129,7 +158,7 @@ class Runtime:
                 await self.store.require_reconciliation(lease, call_id, exc.code)
             else:
                 await self.store.fail(lease, exc.code, call_id)
-        except SQLAlchemyError:
+        except (SQLAlchemyError, OSError):
             # If this repair write also fails, propagate. Durable DISPATCHED intent
             # is the recovery evidence; an unavailable DB is never reported as success.
             if dispatched and spec and spec.side_effect != "read":
@@ -139,6 +168,14 @@ class Runtime:
                 )
             else:
                 raise
+        except Exception:
+            # Quarantine an unexpected pre-dispatch bug; uncertainty after a write
+            # stays in the reconciliation ledger. Never log the exception payload.
+            if dispatched and spec and spec.side_effect != "read":
+                assert call_id is not None
+                await self.store.require_reconciliation(lease, call_id, "unexpected_after_dispatch")
+            else:
+                await self.store.fail(lease, "poison_job_quarantined", call_id)
         finally:
             logger.info(
                 "advance_completed",
@@ -151,14 +188,16 @@ class Runtime:
             )
         return lease.execution_id
 
-    async def reconcile(self, execution_id: UUID, owner: str) -> None:
-        claimed = await self.store.claim_reconciliation(execution_id, owner)
+    async def reconcile(
+        self, execution_id: UUID | None, owner: str, operator_actor: str | None = None
+    ) -> None:
+        claimed = await self.store.claim_reconciliation(execution_id, owner, operator_actor)
         if claimed is None:
             return
         lease, call = claimed
         try:
             async with asyncio.timeout(self.store.settings.tool_timeout):
-                result = await self.tools.lookup(call.operation_key, call.fingerprint)
+                result = await self.tools.lookup_for(call)
             self.metrics.reconciliations.labels(result.status).inc()
             if result.result:
                 await self.store.complete_tool(
@@ -166,9 +205,17 @@ class Runtime:
                 )
             else:
                 await self.store.release_reconciliation(
-                    lease, f"provider_{result.status}_no_replay"
+                    lease, f"provider_{result.status}_no_replay", operator_actor
                 )
         except (ExternalFault, TimeoutError) as exc:
             await self.store.release_reconciliation(
-                lease, exc.code if isinstance(exc, ExternalFault) else "reconciliation_timeout"
+                lease,
+                exc.code if isinstance(exc, ExternalFault) else "reconciliation_timeout",
+                operator_actor,
+            )
+        except (Fault, SQLAlchemyError, OSError):
+            raise
+        except Exception:
+            await self.store.release_reconciliation(
+                lease, "reconciliation_internal_error", operator_actor
             )

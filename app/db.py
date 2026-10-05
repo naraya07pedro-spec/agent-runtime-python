@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
 def connect(url: str) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     engine = create_async_engine(
         url,
+        hide_parameters=True,
         pool_pre_ping=True,
         pool_size=10,
         max_overflow=5,

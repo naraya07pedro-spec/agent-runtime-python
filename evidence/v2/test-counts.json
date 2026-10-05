@@ -1,0 +1,44 @@
+{
+  "categories": {
+    "concurrency": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    "contract": {
+      "passed": 42,
+      "failed": 0,
+      "skipped": 0
+    },
+    "evals": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    "failure_injection": {
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0
+    },
+    "integration": {
+      "passed": 26,
+      "failed": 0,
+      "skipped": 0
+    },
+    "security": {
+      "passed": 22,
+      "failed": 0,
+      "skipped": 0
+    },
+    "unit": {
+      "passed": 124,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "totals": {
+    "passed": 261,
+    "failed": 0,
+    "skipped": 0
+  }
+}

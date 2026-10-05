@@ -26,6 +26,7 @@ stateDiagram-v2
     RETRY_PENDING --> FAILED_PERMANENT: expired deadline
     RETRY_PENDING --> CANCELLED: cancel
     RECONCILIATION_REQUIRED --> CREATED: matching provider result
+    RECONCILIATION_REQUIRED --> FAILED_PERMANENT: operator abandons with unknown effect
     SUCCEEDED --> [*]
     FAILED_PERMANENT --> [*]
     CANCELLED --> [*]
@@ -36,7 +37,9 @@ retry can return DISPATCHED → PROPOSED. A dispatched write cannot. Approval is
 separate immutable decision, not an execution-state alias.
 
 Terminal states cannot transition back to active work. An unresolved write remains
-nonterminal in RECONCILIATION_REQUIRED. Cancellation is intentionally unavailable
+nonterminal in RECONCILIATION_REQUIRED until matching evidence or audited abandonment.
+The independent [reconciliation lifecycle](reconciliation.md) preserves attempts/deadlines;
+ABANDONED keeps the action DISPATCHED and records `effect_unknown`. Cancellation is intentionally unavailable
 while a worker owns active work or while a write outcome is unknown.
 
 A process restart needs no in-memory history. The worker scans expired active
