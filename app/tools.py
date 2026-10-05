@@ -44,6 +44,7 @@ class ToolSpec:
     idempotency_strategy: str = "sha256(business_key, action_fingerprint); durable dispatch intent"
     audit_behavior: str = "transactional proposal, dispatch, outcome, approval and recovery events"
     output_model: type[ToolResult] = ToolResult
+    provider_binding: str | None = None
 
     def validate(self, arguments: JSON) -> JSON:
         try:
@@ -53,7 +54,13 @@ class ToolSpec:
 
 
 class Registry:
-    def __init__(self, allowed: frozenset[str], timeout: float = 10) -> None:
+    def __init__(
+        self,
+        allowed: frozenset[str],
+        timeout: float = 10,
+        github_repository: str | None = None,
+        github_actor: str | None = None,
+    ) -> None:
         specs = [
             ToolSpec(
                 "create_issue",
@@ -63,6 +70,9 @@ class Registry:
                 "irreversible",
                 True,
                 timeout,
+                provider_binding=f"github:{github_repository.lower()}:{github_actor}"
+                if github_repository and github_actor
+                else None,
             ),
             ToolSpec(
                 "lookup_customer",

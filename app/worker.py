@@ -71,7 +71,7 @@ async def run(once: bool, execution_id: UUID | None, recover_only: bool) -> None
                 )
                 if not await drain_operation(operation, stop, settings.worker_drain_seconds):
                     break
-            except (SQLAlchemyError, ConnectionError, TimeoutError, Fault) as exc:
+            except (SQLAlchemyError, OSError, TimeoutError, Fault) as exc:
                 logger.error(
                     "worker_error",
                     extra={

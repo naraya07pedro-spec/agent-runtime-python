@@ -154,6 +154,7 @@ class ActionView(Contract):
     arguments: JSON
     status: str
     approval_expires_at: datetime | None
+    provider_binding: str | None = None
 
 
 class ExecutionView(Contract):
@@ -229,3 +230,4 @@ class Dispatch:
     operation_key: str
     attempt: int
     tenant_id: str = "legacy"
+    provider_binding: str | None = None

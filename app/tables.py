@@ -98,6 +98,7 @@ class ToolCall(Base):
     execution_id: Mapped[UUID] = mapped_column(ForeignKey("executions.id", ondelete="CASCADE"))
     ordinal: Mapped[int] = mapped_column(Integer)
     tool: Mapped[str] = mapped_column(String(80))
+    provider_binding: Mapped[str | None] = mapped_column(String(256))
     fingerprint: Mapped[str] = mapped_column(String(64))
     operation_key: Mapped[str] = mapped_column(String(64), unique=True)
     arguments: Mapped[JSON] = mapped_column(JSONB)

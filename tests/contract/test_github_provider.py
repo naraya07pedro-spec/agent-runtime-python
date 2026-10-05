@@ -28,6 +28,7 @@ def dispatch():
         "a" * 64,
         "b" * 64,
         1,
+        provider_binding="github:synthetic-owner/synthetic-repo:synthetic-bot",
     )
 
 

@@ -72,6 +72,7 @@ class GitHubIssues:
 
     async def execute(self, call: Dispatch) -> ToolResult:
         repository = self.repository(call.tenant_id)
+        self.check_binding(call, repository)
         capture: dict[str, str] = {}
         try:
             raw = await bounded_request(
@@ -91,6 +92,7 @@ class GitHubIssues:
 
     async def lookup(self, call: Dispatch) -> ReconcileResult:
         repository = self.repository(call.tenant_id)
+        self.check_binding(call, repository)
         matches: list[ToolResult] = []
         try:
             # Do not use eventually-consistent search or follow provider-supplied next URLs.
@@ -120,6 +122,10 @@ class GitHubIssues:
             raise ExternalFault("github_lookup_transport", transient=True) from exc
         except (ValueError, ValidationError) as exc:
             raise ExternalFault("github_lookup_invalid") from exc
+
+    def check_binding(self, call: Dispatch, repository: str) -> None:
+        if call.provider_binding != f"github:{repository.lower()}:{self.settings.github_actor}":
+            raise ExternalFault("github_binding_changed", ambiguous=True)
 
 
 class ProviderTools(HttpTools):

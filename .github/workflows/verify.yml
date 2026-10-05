@@ -52,6 +52,7 @@ jobs:
           uv run --locked ruff format --check .
           uv run --locked ruff check .
           uv run --locked mypy app
+          uv run --locked python scripts/check_secrets.py
       - name: Migration from empty database and downgrade roundtrip
         run: |
           uv run --locked alembic upgrade head
@@ -62,11 +63,13 @@ jobs:
       - name: All tests on PostgreSQL
         run: |
           mkdir -p artifacts
-          uv run --locked pytest --cov=app --cov-report=term-missing --cov-report=json:artifacts/coverage.json --junitxml=artifacts/junit.xml
+          uv run --locked pytest --cov=app --cov-fail-under=87 --cov-report=term-missing --cov-report=json:artifacts/coverage.json --junitxml=artifacts/junit.xml
       - name: Deterministic evals and measured admission benchmark
         run: |
           uv run --locked python -m evals.run
           uv run --locked python -m benchmarks.admission
+      - name: Record optional live provider status without credentials or writes
+        run: uv run --locked pytest provider_checks/test_github_live.py --junitxml=artifacts/optional-provider.xml
       - name: Real database SIGKILL, reconnect and isolated backup restore
         env:
           POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}

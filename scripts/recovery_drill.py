@@ -181,7 +181,7 @@ async def drill():
                         raise AssertionError("transaction survived a killed database unexpectedly")
                 try:
                     await store.get(eid)
-                except (SQLAlchemyError, ConnectionError, TimeoutError):
+                except (SQLAlchemyError, OSError, TimeoutError):
                     report["outage_rejected"] = True
                 else:
                     raise AssertionError("DB outage was reported as readable state")
@@ -191,7 +191,7 @@ async def drill():
                     try:
                         view = await store.get(eid)
                         break
-                    except (SQLAlchemyError, ConnectionError, TimeoutError):
+                    except (SQLAlchemyError, OSError, TimeoutError):
                         await asyncio.sleep(0.25)
                 else:
                     raise AssertionError(

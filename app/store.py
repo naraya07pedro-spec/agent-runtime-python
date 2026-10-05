@@ -34,16 +34,23 @@ from app.tables import Approval, Event, Execution, Reconciliation, ToolCall, Web
 from app.tools import ToolSpec
 
 
-def action_digest(tool: str, arguments: JSON, side_effect: str, approval: bool) -> str:
-    return fingerprint(
-        {
-            "tool": tool,
-            "arguments": arguments,
-            "side_effect": side_effect,
-            "approval_required": approval,
-            "contract_version": 1,
-        }
-    )
+def action_digest(
+    tool: str,
+    arguments: JSON,
+    side_effect: str,
+    approval: bool,
+    provider_binding: str | None = None,
+) -> str:
+    identity: JSON = {
+        "tool": tool,
+        "arguments": arguments,
+        "side_effect": side_effect,
+        "approval_required": approval,
+        "contract_version": 1,
+    }
+    if provider_binding is not None:
+        identity.update({"contract_version": 2, "provider_binding": provider_binding})
+    return fingerprint(identity)
 
 
 def no_fault(stage: str) -> None:
@@ -306,6 +313,7 @@ class Store:
                     arguments=call.arguments,
                     status=call.status,
                     approval_expires_at=approval.expires_at if approval else None,
+                    provider_binding=call.provider_binding,
                 )
                 if call
                 else None
@@ -453,7 +461,9 @@ class Store:
             self._release(row)
 
     async def propose(self, lease: Lease, spec: ToolSpec, arguments: JSON) -> UUID | None:
-        digest = action_digest(spec.name, arguments, spec.side_effect, spec.approval)
+        digest = action_digest(
+            spec.name, arguments, spec.side_effect, spec.approval, spec.provider_binding
+        )
         async with self.sessions.begin() as session:
             row = await self._fenced(session, lease)
             if row.steps >= row.max_steps:
@@ -473,6 +483,7 @@ class Store:
                 execution_id=row.id,
                 ordinal=row.steps,
                 tool=spec.name,
+                provider_binding=spec.provider_binding,
                 fingerprint=digest,
                 # Preserve v1 legacy operation identities through migration/restore.
                 operation_key=fingerprint(
@@ -535,6 +546,7 @@ class Store:
             call.operation_key,
             call.attempt,
             tenant_id,
+            call.provider_binding,
         )
 
     async def dispatch(self, lease: Lease, call_id: UUID, spec: ToolSpec) -> Dispatch:
@@ -543,12 +555,15 @@ class Store:
             call = await session.get(ToolCall, call_id)
             if call is None or call.execution_id != row.id or call.status != "PROPOSED":
                 raise Fault("action_not_dispatchable")
-            digest = action_digest(spec.name, call.arguments, spec.side_effect, spec.approval)
+            digest = action_digest(
+                spec.name, call.arguments, spec.side_effect, spec.approval, spec.provider_binding
+            )
             if (
                 call.fingerprint != digest
                 or call.tool != spec.name
                 or call.approval_required != spec.approval
                 or call.side_effect != spec.side_effect
+                or call.provider_binding != spec.provider_binding
             ):
                 raise Fault("action_fingerprint_changed")
             now = await self._now(session)
@@ -687,7 +702,11 @@ class Store:
                 raise Fault("approval_not_pending")
             now = await self._now(session)
             digest = action_digest(
-                call.tool, call.arguments, call.side_effect, call.approval_required
+                call.tool,
+                call.arguments,
+                call.side_effect,
+                call.approval_required,
+                call.provider_binding,
             )
             if (
                 decision.fingerprint != digest

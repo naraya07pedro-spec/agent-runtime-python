@@ -73,13 +73,14 @@ class Runtime:
         spec: ToolSpec | None = None
         dispatched = False
         try:
-            registry = (
-                self.registry
+            tenant = self.store.settings.tenant(lease.tenant_id)
+            registry = Registry(
+                self.registry.allowed
                 if self.store.tenant_id == lease.tenant_id
-                else Registry(
-                    self.store.settings.tenant(lease.tenant_id).allowed_tools,
-                    self.store.settings.tool_timeout,
-                )
+                else tenant.allowed_tools,
+                self.store.settings.tool_timeout,
+                tenant.github_repository,
+                self.store.settings.github_actor,
             )
             if call_id is None:
                 if not await self.store.start_model(lease):
@@ -157,7 +158,7 @@ class Runtime:
                 await self.store.require_reconciliation(lease, call_id, exc.code)
             else:
                 await self.store.fail(lease, exc.code, call_id)
-        except (SQLAlchemyError, ConnectionError):
+        except (SQLAlchemyError, OSError):
             # If this repair write also fails, propagate. Durable DISPATCHED intent
             # is the recovery evidence; an unavailable DB is never reported as success.
             if dispatched and spec and spec.side_effect != "read":
@@ -212,7 +213,7 @@ class Runtime:
                 exc.code if isinstance(exc, ExternalFault) else "reconciliation_timeout",
                 operator_actor,
             )
-        except (Fault, SQLAlchemyError, ConnectionError):
+        except (Fault, SQLAlchemyError, OSError):
             raise
         except Exception:
             await self.store.release_reconciliation(

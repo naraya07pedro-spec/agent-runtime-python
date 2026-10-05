@@ -10,6 +10,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.add_column("tool_calls", sa.Column("provider_binding", sa.String(256), nullable=True))
     op.add_column(
         "executions", sa.Column("tenant_id", sa.String(64), server_default="legacy", nullable=False)
     )
@@ -65,12 +66,14 @@ def downgrade() -> None:
         DO $$ BEGIN
           IF EXISTS (SELECT 1 FROM executions WHERE tenant_id <> 'legacy')
              OR EXISTS (SELECT 1 FROM webhook_receipts WHERE tenant_id <> 'legacy')
-             OR EXISTS (SELECT 1 FROM reconciliations) THEN
+             OR EXISTS (SELECT 1 FROM reconciliations)
+             OR EXISTS (SELECT 1 FROM tool_calls WHERE provider_binding IS NOT NULL) THEN
             RAISE EXCEPTION 'unsafe v2 downgrade: preserve tenant and reconciliation evidence';
           END IF;
         END $$
     """)
     op.drop_table("reconciliations")
+    op.drop_column("tool_calls", "provider_binding")
     op.drop_constraint("webhook_receipts_pkey", "webhook_receipts", type_="primary")
     op.drop_column("webhook_receipts", "tenant_id")
     op.create_primary_key("webhook_receipts_pkey", "webhook_receipts", ["nonce_hash"])

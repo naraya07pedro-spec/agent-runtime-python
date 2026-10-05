@@ -85,7 +85,7 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         return error(request, "invalid_request", 422)
 
     @app.exception_handler(SQLAlchemyError)
-    @app.exception_handler(ConnectionError)
+    @app.exception_handler(OSError)
     @app.exception_handler(TimeoutError)
     async def database_error(request: Request, exc: SQLAlchemyError) -> JSONResponse:
         logger.error("database_unavailable", extra={"request_id": str(request.state.request_id)})
