@@ -34,7 +34,7 @@ jobs:
           RUNTIME_GITHUB_REPOSITORY: ${{ vars.GITHUB_PROVIDER_TEST_REPOSITORY }}
           RUNTIME_GITHUB_ACTOR: ${{ vars.GITHUB_PROVIDER_TEST_ACTOR }}
         run: uv run --locked pytest provider_checks/test_github_live.py -v --junitxml=artifacts/optional-provider.xml
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: optional-live-provider-${{ github.sha }}
