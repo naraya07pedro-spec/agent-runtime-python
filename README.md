@@ -1,5 +1,20 @@
 # Bounded Agent Runtime
 
+## Hiring manager quick scan
+
+**Role fit:** Python Backend · FastAPI · API/Integration · AI Application Engineering
+
+**What to notice:** this is not a prompt demo. It is a PostgreSQL-backed runtime built around explicit state, authorization, approvals, worker fencing, uncertain external outcomes and recovery.
+
+- **Python / FastAPI / Pydantic / PostgreSQL**
+- **261 passing tests** and **90.01% coverage** in the preserved v2 evidence archive
+- Real process-death, concurrency, tenant-isolation and PostgreSQL interruption tests
+- Persistent approvals and bounded reconciliation instead of blind retries
+- CI covers typing, migrations, security checks, Docker smoke, evals and recovery drills
+
+**Fastest review path:** [architecture](docs/architecture.md) → [process-death tests](tests/failure_injection/test_process_death.py) → [tenant security](tests/security/test_tenants.py) → [recovery drill](scripts/recovery_drill.py)
+
+
 A Python/FastAPI agent runtime with PostgreSQL state, tenant authorization, persistent
 human approvals and recovery for uncertain external effects.
 
