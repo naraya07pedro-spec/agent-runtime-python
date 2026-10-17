@@ -1,5 +1,9 @@
 # Bounded Agent Runtime
 
+[![CI - verify](https://github.com/naraya07pedro-spec/agent-runtime-python/actions/workflows/verify.yml/badge.svg)](https://github.com/naraya07pedro-spec/agent-runtime-python/actions/workflows/verify.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 ## Hiring manager quick scan
 
 **Role fit:** Python Backend · FastAPI · API/Integration · AI Application Engineering
@@ -66,6 +70,25 @@ DB metrics represent durable facts across workers. No mandatory broker or agent 
 Read [architecture](docs/architecture.md), [recovery semantics](docs/reliability-model.md),
 [reconciliation](docs/reconciliation.md), [provider contract](docs/provider-contract.md)
 and [limitations](docs/limitations.md).
+
+## Architecture diagram
+
+```mermaid
+flowchart LR
+    C[Client request] --> API[FastAPI API]
+    API --> AUTH[Tenant auth and admission bounds]
+    AUTH --> Q[PostgreSQL queue with dispatch intent]
+    Q --> W[Worker acquires lease]
+    W --> APPR{Approval required}
+    APPR|"pending or denied"| W
+    APPR|approved| T[External tool call]
+    T --> OUT{Outcome}
+    OUT|certain| CMT[Fenced write commits result]
+    OUT|ambiguous| REC[Bounded read-only reconciliation]
+    REC|resolved| CMT
+    REC|unresolved| MAN[Manual review]
+    CMT --> DB[(PostgreSQL)]
+```
 
 ## Run the sandbox
 
