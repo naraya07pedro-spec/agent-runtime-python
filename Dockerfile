@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.15-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UV_LINK_MODE=copy
 WORKDIR /srv
 RUN pip install --no-cache-dir uv==0.12.19 && useradd --create-home --uid 10001 runtime
