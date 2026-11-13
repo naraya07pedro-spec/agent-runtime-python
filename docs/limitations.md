@@ -41,3 +41,11 @@
   Rolling mixed-version customer deployment is not certified; drain old workers first.
 - Reported tokens can be lost after a paid call; token budgets are not exact spend caps.
   Admission benchmarks omit TCP/TLS/model/tool latency and are not production capacity.
+
+- Ingress is a **single-process** token bucket. Requests without a role-matched bearer
+  can consume at most 25% of its shared budget in a burst; verified bearer callers
+  share the total budget. Signed webhooks are conservatively treated as untrusted
+  at the pre-body ingress gate, so webhook delivery still needs an upstream gateway
+  with ingress/fairness controls and proper retry handling. The /ready endpoint
+  consumes rate budget because it queries PostgreSQL; /health remains free.
+  This is **not** a distributed DDoS defense or a substitute for gateway limits.
