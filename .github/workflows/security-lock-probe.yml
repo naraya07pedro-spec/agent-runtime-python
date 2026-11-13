@@ -1,0 +1,39 @@
+# One-time read-only lock resolution probe. Delete this workflow before final PR review.
+name: Security lock proposal (read-only)
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/security-lock-probe.yml"
+permissions:
+  contents: read
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: "0.12.19"
+      - name: Resolve only fixed security package versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv lock --upgrade-package 'certifi==2026.10.18' --upgrade-package 'opentelemetry-api==1.45.1' --no-progress
+          python3 - <<'PY'
+          import tomllib
+          with open("uv.lock", "rb") as f:
+              packages = {entry["name"]: entry["version"] for entry in tomllib.load(f)["package"]}
+          assert packages["certifi"] == "2026.10.18", packages["certifi"]
+          assert packages["opentelemetry-api"] == "1.45.1", packages["opentelemetry-api"]
+          print("PIN_VERIFIED certifi=2026.10.18 opentelemetry-api=1.45.1")
+          PY
+          echo "LOCKFILE_DIFF_START"
+          git diff --no-ext-diff -- uv.lock
+          echo "LOCKFILE_DIFF_END"
+          test "$(git diff --name-only | tr -d '\r')" = "uv.lock"
+          uv export --locked --no-dev --no-emit-project --format requirements-txt > /tmp/runtime-requirements.txt
+          uv run --locked pip-audit -r /tmp/runtime-requirements.txt --disable-pip --no-deps
