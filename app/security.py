@@ -81,7 +81,9 @@ class IngressLimits:
         else:
             return False
 
-        auth_headers = [value for key, value in scope.get("headers", []) if key.lower() == b"authorization"]
+        auth_headers = [
+            value for key, value in scope.get("headers", []) if key.lower() == b"authorization"
+        ]
         if len(auth_headers) != 1 or len(auth_headers[0]) > 8192:
             return False
         supplied = auth_headers[0]
@@ -100,9 +102,7 @@ class IngressLimits:
         request_id = str(scope.get("state", {}).get("request_id", "unassigned"))
         now = time.monotonic()
         elapsed = max(0.0, now - self.last)
-        self.tokens = min(
-            float(self.capacity), self.tokens + elapsed * self.capacity / 60
-        )
+        self.tokens = min(float(self.capacity), self.tokens + elapsed * self.capacity / 60)
         self.untrusted_tokens = min(
             float(self.untrusted_capacity),
             self.untrusted_tokens + elapsed * self.untrusted_capacity / 60,
