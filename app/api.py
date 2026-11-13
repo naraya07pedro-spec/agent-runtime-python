@@ -98,10 +98,23 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         logger.error("internal_error", extra={"request_id": str(request.state.request_id)})
         return error(request, "internal_error", 500)
 
+    # Fixed credentials are used only to reserve ingress capacity for actual,
+    # role-matched callers. Handler authorization remains the source of truth.
+    role_bearers = tuple(
+        (role, ("Bearer " + credential.key.get_secret_value()).encode())
+        for tenant in config.identities()
+        for role in ("api", "approval", "operator")
+        for credential in getattr(tenant, f"{role}_keys")
+    )
+    if config.operator_key is not None:
+        role_bearers += (
+            ("process", ("Bearer " + config.operator_key.get_secret_value()).encode()),
+        )
     app.add_middleware(
         IngressLimits,
         max_bytes=config.max_request_bytes,
         requests_per_minute=config.requests_per_minute,
+        role_bearers=role_bearers,
     )
 
     @app.middleware("http")
