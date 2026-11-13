@@ -50,11 +50,50 @@ def verify_webhook(
 class IngressLimits:
     """Single-process ingress bound; a gateway must enforce distributed quotas."""
 
-    def __init__(self, app: ASGIApp, max_bytes: int, requests_per_minute: int) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        max_bytes: int,
+        requests_per_minute: int,
+        role_bearers: tuple[tuple[str, bytes], ...] = (),
+    ) -> None:
         self.app, self.max_bytes = app, max_bytes
         self.capacity = requests_per_minute
         self.tokens = float(requests_per_minute)
+        # Unknown/invalid credentials cannot consume the entire shared quota.
+        # Keep the global bound unchanged; reserve 75% for role-matched bearer
+        # credentials. A reverse proxy still must enforce distributed limits.
+        self.untrusted_capacity = max(1, requests_per_minute // 4)
+        self.untrusted_tokens = float(self.untrusted_capacity)
+        self.role_bearers = role_bearers
         self.last = time.monotonic()
+
+    def _trusted_bearer(self, scope: Scope) -> bool:
+        path = scope.get("path", "")
+        if path == "/process-metrics":
+            role = "process"
+        elif path.startswith("/approvals/"):
+            role = "approval"
+        elif path.startswith("/executions/") and path.endswith("/operator"):
+            role = "operator"
+        elif path == "/metrics" or path == "/executions" or path.startswith("/executions/"):
+            role = "api"
+        else:
+            return False
+
+        auth_headers = [
+            value for key, value in scope.get("headers", []) if key.lower() == b"authorization"
+        ]
+        if len(auth_headers) != 1 or len(auth_headers[0]) > 8192:
+            return False
+        supplied = auth_headers[0]
+        matched = False
+        # Compare every configured key of the role, rather than trusting a
+        # bearer-shaped header or a key belonging to a different role.
+        for configured_role, expected in self.role_bearers:
+            if configured_role == role and hmac.compare_digest(supplied, expected):
+                matched = True
+        return matched
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -62,12 +101,18 @@ class IngressLimits:
             return
         request_id = str(scope.get("state", {}).get("request_id", "unassigned"))
         now = time.monotonic()
-        self.tokens = min(
-            float(self.capacity), self.tokens + (now - self.last) * self.capacity / 60
+        elapsed = max(0.0, now - self.last)
+        self.tokens = min(float(self.capacity), self.tokens + elapsed * self.capacity / 60)
+        self.untrusted_tokens = min(
+            float(self.untrusted_capacity),
+            self.untrusted_tokens + elapsed * self.untrusted_capacity / 60,
         )
         self.last = now
-        if scope["path"] not in {"/health", "/ready"}:
-            if self.tokens < 1:
+        # Only the cheap, database-free liveness endpoint is exempt. /ready
+        # performs PostgreSQL queries and must not be a free flood target.
+        if scope["path"] != "/health":
+            trusted = self._trusted_bearer(scope)
+            if self.tokens < 1 or (not trusted and self.untrusted_tokens < 1):
                 await JSONResponse(
                     {"error": {"code": "ingress_rate_limited", "request_id": request_id}},
                     status_code=429,
@@ -75,6 +120,8 @@ class IngressLimits:
                 )(scope, receive, send)
                 return
             self.tokens -= 1
+            if not trusted:
+                self.untrusted_tokens -= 1
         data = bytearray()
         while True:
             message = await receive()

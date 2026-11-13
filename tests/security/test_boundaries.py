@@ -185,6 +185,37 @@ async def test_ingress_rate_limit(rig):
 
 
 @pytest.mark.integration
+async def test_invalid_bearer_flood_cannot_exhaust_reserved_api_capacity(rig):
+    rig.settings.requests_per_minute = 8
+    app = create_app(rig.settings, rig.runtime)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        # The untrusted lane is limited to 2 of the 8 shared tokens.
+        denied = [await client.get("/metrics") for _ in range(6)]
+        assert [response.status_code for response in denied] == [401, 401, 429, 429, 429, 429]
+        # A real, role-matched API credential still has reserved capacity.
+        allowed = await client.get("/metrics", headers={"Authorization": "Bearer " + "a" * 40})
+        assert allowed.status_code == 200
+        # A valid key for the *wrong role* cannot impersonate the API lane.
+        wrong_role = await client.get("/metrics", headers={"Authorization": "Bearer " + "b" * 40})
+        assert wrong_role.status_code == 429
+
+
+@pytest.mark.integration
+async def test_ready_requires_ingress_budget_but_health_remains_unlimited(rig):
+    rig.settings.requests_per_minute = 4
+    app = create_app(rig.settings, rig.runtime)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        first = await client.get("/ready")
+        assert first.status_code == 200
+        assert (await client.get("/ready")).status_code == 429
+        assert (await client.get("/health")).status_code == 200
+
+
+@pytest.mark.integration
 async def test_concurrent_webhook_replay_and_receipt_rollback(rig):
     from sqlalchemy import func, select
 
