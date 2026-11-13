@@ -195,14 +195,10 @@ async def test_invalid_bearer_flood_cannot_exhaust_reserved_api_capacity(rig):
         denied = [await client.get("/metrics") for _ in range(6)]
         assert [response.status_code for response in denied] == [401, 401, 429, 429, 429, 429]
         # A real, role-matched API credential still has reserved capacity.
-        allowed = await client.get(
-            "/metrics", headers={"Authorization": "Bearer " + "a" * 40}
-        )
+        allowed = await client.get("/metrics", headers={"Authorization": "Bearer " + "a" * 40})
         assert allowed.status_code == 200
         # A valid key for the *wrong role* cannot impersonate the API lane.
-        wrong_role = await client.get(
-            "/metrics", headers={"Authorization": "Bearer " + "b" * 40}
-        )
+        wrong_role = await client.get("/metrics", headers={"Authorization": "Bearer " + "b" * 40})
         assert wrong_role.status_code == 429
 
 
