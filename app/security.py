@@ -126,16 +126,12 @@ class IngressLimits:
         # The streaming check below remains authoritative even if this header
         # is absent, duplicated, or claims a smaller size.
         declared = [
-            value for name, value in scope.get("headers", [])
-            if name.lower() == b"content-length"
+            value for name, value in scope.get("headers", []) if name.lower() == b"content-length"
         ]
         oversized = (
             len(declared) == 1
             and declared[0].isdigit()
-            and (
-                len(declared[0].lstrip(b"0")) > 20
-                or int(declared[0]) > self.max_bytes
-            )
+            and (len(declared[0].lstrip(b"0")) > 20 or int(declared[0]) > self.max_bytes)
         )
         if oversized:
             await JSONResponse(
