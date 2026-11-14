@@ -94,6 +94,7 @@ async def test_exact_boundary_is_forwarded_unchanged():
         {"type": "http.request", "body": b"a" * 1000 + b"b" * 24, "more_body": False}
     ]
 
+
 @pytest.mark.parametrize(
     ("advertised_length", "expected_status"),
     [(b"0" * 5000 + b"2", 204), (b"9" * 5000, 413)],
