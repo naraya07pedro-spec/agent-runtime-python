@@ -122,18 +122,43 @@ class IngressLimits:
             self.tokens -= 1
             if not trusted:
                 self.untrusted_tokens -= 1
+        # An advertised size may be dishonest, so this is only a fast reject.
+        # The streaming check below remains authoritative even if this header
+        # is absent, duplicated, or claims a smaller size.
+        declared = [
+            value for name, value in scope.get("headers", []) if name.lower() == b"content-length"
+        ]
+        oversized = False
+        if len(declared) == 1 and declared[0].isdigit():
+            significant = declared[0].lstrip(b"0")
+            # Strip zeros before conversion to avoid Python's integer-digit limit.
+            oversized = len(significant) > 20 or (
+                bool(significant) and int(significant) > self.max_bytes
+            )
+        if oversized:
+            await JSONResponse(
+                {"error": {"code": "request_too_large", "request_id": request_id}},
+                status_code=413,
+            )(scope, receive, send)
+            return
+
+        # A single bounded accumulator avoids per-fragment list growth:
+        # tiny (including empty) ASGI messages must not amplify heap usage.
         data = bytearray()
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
                 return
-            data.extend(message.get("body", b""))
-            if len(data) > self.max_bytes:
+            chunk = message.get("body", b"")
+            # Check the actual chunk before any copy/extend.
+            # A dishonest Content-Length must not bypass this bound.
+            if len(chunk) > self.max_bytes - len(data):
                 await JSONResponse(
                     {"error": {"code": "request_too_large", "request_id": request_id}},
                     status_code=413,
                 )(scope, receive, send)
                 return
+            data.extend(chunk)
             if not message.get("more_body", False):
                 break
         delivered = False
