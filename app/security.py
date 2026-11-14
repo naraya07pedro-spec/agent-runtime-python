@@ -122,18 +122,45 @@ class IngressLimits:
             self.tokens -= 1
             if not trusted:
                 self.untrusted_tokens -= 1
-        data = bytearray()
+        # An advertised size may be dishonest, so this is only a fast reject.
+        # The streaming check below remains authoritative even if this header
+        # is absent, duplicated, or claims a smaller size.
+        declared = [
+            value for name, value in scope.get("headers", [])
+            if name.lower() == b"content-length"
+        ]
+        oversized = (
+            len(declared) == 1
+            and declared[0].isdigit()
+            and (
+                len(declared[0].lstrip(b"0")) > 20
+                or int(declared[0]) > self.max_bytes
+            )
+        )
+        if oversized:
+            await JSONResponse(
+                {"error": {"code": "request_too_large", "request_id": request_id}},
+                status_code=413,
+            )(scope, receive, send)
+            return
+
+        chunks: list[bytes] = []
+        total = 0
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
                 return
-            data.extend(message.get("body", b""))
-            if len(data) > self.max_bytes:
+            chunk = message.get("body", b"")
+            # Check before copying/retaining an untrusted ASGI body chunk.
+            # A single huge chunk must not cause a second huge allocation.
+            if len(chunk) > self.max_bytes - total:
                 await JSONResponse(
                     {"error": {"code": "request_too_large", "request_id": request_id}},
                     status_code=413,
                 )(scope, receive, send)
                 return
+            total += len(chunk)
+            chunks.append(chunk)
             if not message.get("more_body", False):
                 break
         delivered = False
@@ -142,7 +169,7 @@ class IngressLimits:
             nonlocal delivered
             if not delivered:
                 delivered = True
-                return {"type": "http.request", "body": bytes(data), "more_body": False}
+                return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
             return await receive()
 
         await self.app(scope, buffered_receive, send)
