@@ -35,9 +35,7 @@ async def exercise(
     async def send(message: Message) -> None:
         outbound.append(message)
 
-    headers = (
-        [(b"content-length", advertised_length)] if advertised_length is not None else []
-    )
+    headers = [(b"content-length", advertised_length)] if advertised_length is not None else []
     scope: Scope = {
         "type": "http",
         "method": "POST",
