@@ -101,9 +101,7 @@ async def test_many_tiny_and_empty_chunks_preserve_exact_body():
     frames: list[Message] = [
         {"type": "http.request", "body": b"", "more_body": True} for _ in range(512)
     ]
-    frames.extend(
-        {"type": "http.request", "body": b"x", "more_body": True} for _ in range(1023)
-    )
+    frames.extend({"type": "http.request", "body": b"x", "more_body": True} for _ in range(1023))
     frames.append({"type": "http.request", "body": b"x", "more_body": False})
     observed, outbound, reads = await exercise(
         advertised_length=None,
@@ -111,9 +109,7 @@ async def test_many_tiny_and_empty_chunks_preserve_exact_body():
     )
     assert outbound[0]["status"] == 204
     assert reads == len(frames)
-    assert observed == [
-        {"type": "http.request", "body": b"x" * 1024, "more_body": False}
-    ]
+    assert observed == [{"type": "http.request", "body": b"x" * 1024, "more_body": False}]
 
 
 async def test_over_budget_fragment_stops_before_downstream_or_extra_reads():
