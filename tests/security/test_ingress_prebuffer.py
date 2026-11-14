@@ -93,3 +93,18 @@ async def test_exact_boundary_is_forwarded_unchanged():
     assert observed == [
         {"type": "http.request", "body": b"a" * 1000 + b"b" * 24, "more_body": False}
     ]
+
+@pytest.mark.parametrize(
+    ("advertised_length", "expected_status"),
+    [(b"0" * 5000 + b"2", 204), (b"9" * 5000, 413)],
+)
+async def test_extreme_digit_headers_are_bounded_without_conversion_failure(
+    advertised_length: bytes, expected_status: int
+):
+    observed, outbound, reads = await exercise(
+        advertised_length=advertised_length,
+        messages=[{"type": "http.request", "body": b"ok", "more_body": False}],
+    )
+    assert outbound[0]["status"] == expected_status
+    assert reads == (1 if expected_status == 204 else 0)
+    assert len(observed) == (1 if expected_status == 204 else 0)
