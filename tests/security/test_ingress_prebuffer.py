@@ -95,6 +95,42 @@ async def test_exact_boundary_is_forwarded_unchanged():
     ]
 
 
+async def test_many_tiny_and_empty_chunks_preserve_exact_body():
+    # Hundreds of zero-byte frames plus 1,024 one-byte frames used to make
+    # a list with far more allocations than the admitted body itself.
+    frames: list[Message] = [
+        {"type": "http.request", "body": b"", "more_body": True} for _ in range(512)
+    ]
+    frames.extend(
+        {"type": "http.request", "body": b"x", "more_body": True} for _ in range(1023)
+    )
+    frames.append({"type": "http.request", "body": b"x", "more_body": False})
+    observed, outbound, reads = await exercise(
+        advertised_length=None,
+        messages=frames,
+    )
+    assert outbound[0]["status"] == 204
+    assert reads == len(frames)
+    assert observed == [
+        {"type": "http.request", "body": b"x" * 1024, "more_body": False}
+    ]
+
+
+async def test_over_budget_fragment_stops_before_downstream_or_extra_reads():
+    frames: list[Message] = [
+        {"type": "http.request", "body": b"a" * 1023, "more_body": True},
+        {"type": "http.request", "body": b"bc", "more_body": True},
+        {"type": "http.request", "body": b"must-not-be-read", "more_body": False},
+    ]
+    observed, outbound, reads = await exercise(
+        advertised_length=b"1",
+        messages=frames,
+    )
+    assert outbound[0]["status"] == 413
+    assert reads == 2
+    assert observed == []
+
+
 @pytest.mark.parametrize(
     ("advertised_length", "expected_status"),
     [(b"0" * 5000 + b"2", 204), (b"9" * 5000, 413)],
