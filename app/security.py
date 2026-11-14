@@ -142,23 +142,23 @@ class IngressLimits:
             )(scope, receive, send)
             return
 
-        chunks: list[bytes] = []
-        total = 0
+        # A single bounded accumulator avoids per-fragment list growth:
+        # tiny (including empty) ASGI messages must not amplify heap usage.
+        data = bytearray()
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
                 return
             chunk = message.get("body", b"")
-            # Check before copying/retaining an untrusted ASGI body chunk.
-            # A single huge chunk must not cause a second huge allocation.
-            if len(chunk) > self.max_bytes - total:
+            # Check the actual chunk before any copy/extend.
+            # A dishonest Content-Length must not bypass this bound.
+            if len(chunk) > self.max_bytes - len(data):
                 await JSONResponse(
                     {"error": {"code": "request_too_large", "request_id": request_id}},
                     status_code=413,
                 )(scope, receive, send)
                 return
-            total += len(chunk)
-            chunks.append(chunk)
+            data.extend(chunk)
             if not message.get("more_body", False):
                 break
         delivered = False
@@ -167,7 +167,7 @@ class IngressLimits:
             nonlocal delivered
             if not delivered:
                 delivered = True
-                return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+                return {"type": "http.request", "body": bytes(data), "more_body": False}
             return await receive()
 
         await self.app(scope, buffered_receive, send)
