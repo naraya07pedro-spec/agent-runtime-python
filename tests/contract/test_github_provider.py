@@ -206,3 +206,24 @@ async def test_success_status_and_request_id_contract(github_settings, status):
                 await provider.execute(call)
         else:
             assert (await provider.execute(call)).provider_request_id is None
+
+
+@pytest.mark.parametrize("status", [403, 429, 500, 502, 503])
+async def test_lookup_non_success_status_is_ambiguous_and_never_found_or_absent(
+    github_settings, status
+):
+    call = dispatch()
+    methods = []
+
+    def handle(request):
+        methods.append(request.method)
+        return httpx.Response(status, headers={"Retry-After": "1"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        provider = GitHubIssues(client, github_settings)
+        with pytest.raises(ExternalFault) as caught:
+            await provider.lookup(call)
+    # A failed lookup must never be read as "absent", which would permit a replayed POST.
+    assert caught.value.code == "provider_status_invalid"
+    assert caught.value.ambiguous is True
+    assert methods == ["GET"]
