@@ -13,7 +13,7 @@ ownership, deduplication, replay receipts, or recovery.
 | Failure injection | Partial commits, poison jobs, bounded reconciliation/operator races, connection termination, real SIGTERM |
 | Process death | Real worker exits after claim and after irreversible provider success; replacement ownership/reconciliation |
 | Security | HMAC/replay, tenant/role isolation, rotation, target-bound approval, policy and ingress limits |
-| Deterministic evals | Twelve fixed model decisions evaluated against real runtime policy; zero paid model calls |
+| Deterministic evals | Fifteen fixed model decisions evaluated against real runtime policy; zero paid model calls |
 
 `pytest` marks cross-cut these directory categories. For example, a security test
 using PostgreSQL has both `security` and `integration` marks. The generated report
