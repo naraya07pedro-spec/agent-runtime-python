@@ -15,7 +15,7 @@ and tested commit identities; see [v2 evidence](../evidence/v2/README.md) and
 | Approval | Action mutation/expiry and competing decisions can invalidate authority | Digest recheck at dispatch; separate credential; race/denial tests |
 | Replay | Nonce receipt must be durable and atomic with admission | Eight simultaneous signed deliveries; conflict rolls back receipt |
 | Database | SQL non-null permits JSON `null`; partial lease/decision rows undermine invariants | JSON-object CHECK constraints, active lease and complete approval constraints; direct SQL tests |
-| Trust | Typed model output can still request unauthorized tools or authority | Default-deny registry; strict contracts; 12 deterministic eval cases |
+| Trust | Typed model output can still request unauthorized tools or authority | Default-deny registry; strict contracts; 15 deterministic eval cases |
 | HTTP | Reading an entire upstream response before checking length leaves allocation unbounded | Streamed response cap and HTTP contract tests |
 | Configuration | Readiness previously checked DB/auth but not selected provider configuration | Model/tool preflight checks and readiness regression |
 | Error contract | Ingress size/rate errors lacked request IDs | Sanitized uniform error metadata and security assertions |
