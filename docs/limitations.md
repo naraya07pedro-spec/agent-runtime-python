@@ -1,51 +1,48 @@
 # Explicit limitations
 
-- This reference establishes an artifact and controlled tests, not production adoption,
-  tenure/title, paying customers, uptime, ROI, customer scale or external certification.
-- The GitHub Issues adapter is exercised with synthetic native HTTP responses and real
-  PostgreSQL recovery. Its optional live authenticated write check has not been run with
-  credentials. OpenAI live behavior, model reasoning quality and billing remain unverified.
-- Local fencing does not cancel remote requests. Markers are correlation evidence, not
-  provider-enforced idempotency. GitHub lookup covers at most 30 recent issues and trusts
-  the configured actor; provider compromise, copied markers and effects outside the lookup
-  window require operator review. No universal exactly-once or compensation is implemented.
-- Automatic reconciliation has a durable budget/deadline. Manual review can remain unresolved
-  indefinitely. ABANDONED ends local scheduling while preserving unknown external effect.
-- Tenant/role isolation is enforced in application queries and policies. There is no RLS,
-  OIDC/SSO, verified individual identity, automatic provisioning or four-eyes approval. The
-  service/database administrators remain trusted. Provider credentials are service scoped.
-- Rotation overlap/revocation is configuration based and tested with synthetic keys. Every
-  real process must receive the updated configuration; no online revocation service or real
-  external credential rotation has been tested.
-- PostgreSQL stores prompts/arguments/outcomes in cleartext at the application layer. Log
-  redaction and hidden validation inputs do not implement encryption, erasure, retention
-  compliance, or tamper-proof audit. DBA alteration/deletion can destroy evidence.
-- Backup/restore and PostgreSQL SIGKILL/reconnect are controlled disposable-database drills.
-  There is no production RPO/RTO guarantee, automated restore detection, PITR/HA/multi-region
-  failover or disk-corruption certification. Lost post-snapshot intent remains dangerous;
-  maintenance mode and external loss-window review are mandatory before dispatch resumes.
-- Process counters reset and must be scraped from every process. DB gauges duplicate across
-  API replicas and must not be summed across duplicate scrapes. No deployed collector, SLO
-  dashboard, alert rules or end-to-end OpenTelemetry tracing is claimed.
-- Queue capacity/admission quotas share PostgreSQL state, but scheduling has no tenant
-  fairness, priority queue, sharding or account-wide provider quota. Reconciliation and work
-  each take one item per polling cycle. All-route distributed ingress quotas/slow-client
-  defense, TLS, egress/DNS-rebinding policy and production secrets remain deployment work.
-- SIGTERM stops new claims and allows a bounded drain. Deadline expiry/SIGKILL preserves
-  intent for recovery rather than guaranteeing completion. Leases have no heartbeat and
-  deadlines cannot undo a remote effect already accepted.
-- Poison pre-dispatch jobs are quarantined as FAILED_PERMANENT with an explicit code;
-  uncertain writes stay in reconciliation. No automatic poison-job replay or external DLQ
-  service is implemented. Business rejection versus programmer defect still needs diagnosis.
-- The populated v1→v2 upgrade and guarded downgrade are tested on synthetic databases.
-  Rolling mixed-version customer deployment is not certified; drain old workers first.
-- Reported tokens can be lost after a paid call; token budgets are not exact spend caps.
-  Admission benchmarks omit TCP/TLS/model/tool latency and are not production capacity.
+Setiap batasan di bawah dipetakan ke bukti. Arti kolom status:
 
-- Ingress is a **single-process** token bucket. Requests without a role-matched bearer
-  can consume at most 25% of its shared budget in a burst; verified bearer callers
-  share the total budget. Signed webhooks are conservatively treated as untrusted
-  at the pre-body ingress gate, so webhook delivery still needs an upstream gateway
-  with ingress/fairness controls and proper retry handling. The /ready endpoint
-  consumes rate budget because it queries PostgreSQL; /health remains free.
-  This is **not** a distributed DDoS defense or a substitute for gateway limits.
+- **verified**: ada test atau drill di repo yang menjalankan perilaku yang diklaim. Link menunjuk
+  ke file yang ada. Verified hanya berlaku untuk bagian yang diklaim, bukan untuk produksi.
+- **unverified**: tidak ada test yang membuktikannya (termasuk klaim "tidak ada fitur X" dan
+  hal yang sengaja belum dijalankan). Kolom bukti menjelaskan kenapa.
+
+| Klaim / batasan | Status | Bukti |
+| --- | --- | --- |
+| Repo ini adalah artifact dan test terkontrol, bukan adopsi produksi, tenure/title, pelanggan berbayar, uptime, ROI, skala pelanggan atau sertifikasi eksternal. | unverified | Klaim negatif; tidak ada yang bisa dites. Lihat [README](../README.md). |
+| Adapter GitHub Issues diuji dengan respons HTTP native sintetis. | verified | [tests/contract/test_github_provider.py](../tests/contract/test_github_provider.py) |
+| Adapter GitHub Issues pulih dari timeout commit tanpa membuat issue kedua, di atas PostgreSQL nyata. | verified | [tests/integration/test_github_runtime.py](../tests/integration/test_github_runtime.py) |
+| Cek tulis GitHub live yang terautentikasi belum pernah dijalankan dengan kredensial. | unverified | [provider_checks/test_github_live.py](../provider_checks/test_github_live.py) hanya dijalankan di CI tanpa kredensial dan tanpa write. |
+| Perilaku live OpenAI, kualitas reasoning model dan billing. | unverified | Tidak ada test; model diuji dengan provider berskrip di [tests/integration/test_runtime.py](../tests/integration/test_runtime.py). |
+| Fencing lokal tidak membatalkan request remote; worker yang lease-nya habis masih bisa mengirim terlambat, dan lookup yang tidak menemukan apa-apa tidak pernah mengizinkan replay. | verified | [tests/concurrency/test_ownership.py](../tests/concurrency/test_ownership.py) (`test_expired_worker_can_send_late_but_absent_lookup_never_authorizes_replay`) |
+| Marker adalah bukti korelasi, bukan idempotency yang ditegakkan provider; marker yang disalin dan efek di luar jendela lookup butuh review operator. | unverified | Tidak ada test untuk marker yang disalin atau provider yang dikompromikan. |
+| Lookup GitHub dibatasi 3 halaman x 10 issue (30 issue terbaru) dan tidak mengikuti URL `next` dari respons. | verified | [tests/contract/test_github_provider.py](../tests/contract/test_github_provider.py) (`test_lookup_is_bounded_and_does_not_follow_supplied_next_url`) |
+| Tidak ada exactly-once universal atau kompensasi. | unverified | Klaim negatif; tidak ada test. |
+| Rekonsiliasi otomatis punya budget/deadline yang durable, dan lookup manual tidak bisa me-replay. | verified | [tests/failure_injection/test_reconciliation_lifecycle.py](../tests/failure_injection/test_reconciliation_lifecycle.py) (`test_lookup_budget_exhaustion_is_durable_and_manual_lookup_cannot_replay`) |
+| ABANDONED menghentikan penjadwalan lokal dan tetap menyimpan bukti dispatch. | verified | [tests/failure_injection/test_reconciliation_lifecycle.py](../tests/failure_injection/test_reconciliation_lifecycle.py) (`test_abandon_keeps_dispatch_evidence_and_rejects_late_completion`) |
+| Review manual bisa tidak terselesaikan tanpa batas waktu. | unverified | Tidak ada test untuk batas atas review manual. |
+| Isolasi tenant dan role ditegakkan di query dan policy aplikasi: ID tenant lain tidak membocorkan state dan tidak bisa menulis. | verified | [tests/security/test_tenants.py](../tests/security/test_tenants.py) (`test_cross_tenant_ids_reveal_no_state_and_allow_no_write`, `test_approval_and_operator_roles_cannot_cross_tenants_or_replace_api_role`) |
+| Tidak ada RLS, OIDC/SSO, identitas individu terverifikasi, provisioning otomatis atau persetujuan four-eyes; admin servis/database tetap dipercaya; kredensial provider berskala servis. | unverified | Klaim negatif; tidak ada test. |
+| Rotasi kunci dengan overlap dan pencabutan berbasis konfigurasi, diuji dengan kunci sintetis. | verified | [tests/security/test_tenants.py](../tests/security/test_tenants.py) (`test_key_rotation_overlap_and_revocation_preserve_tenant_identity`) |
+| Setiap proses nyata harus menerima konfigurasi terbaru; tidak ada layanan pencabutan online; rotasi kredensial eksternal nyata belum diuji. | unverified | Tidak ada test lintas proses atau dengan kredensial nyata. |
+| Log normal membuang payload dan pesan exception, dan error API tidak menggemakan input sensitif. | verified | [tests/unit/test_invariants.py](../tests/unit/test_invariants.py) (`test_normal_logging_discards_payloads_and_exception_messages`), [tests/security/test_boundaries.py](../tests/security/test_boundaries.py) (`test_api_errors_do_not_echo_sensitive_inputs`) |
+| PostgreSQL menyimpan prompt, argumen dan outcome dalam cleartext di level aplikasi; tidak ada enkripsi, erasure, kepatuhan retensi atau audit tahan manipulasi; DBA bisa mengubah atau menghapus bukti. | unverified | Klaim negatif; tidak ada test. |
+| Backup/restore dan SIGKILL/reconnect PostgreSQL diuji sebagai drill pada database sekali pakai. | verified | [scripts/recovery_drill.py](../scripts/recovery_drill.py) (dijalankan di CI, bukan lewat pytest), [tests/failure_injection/test_database_interruptions.py](../tests/failure_injection/test_database_interruptions.py) |
+| Mode maintenance setelah restore memblokir claim dan admission tapi mengizinkan lookup aman. | verified | [tests/failure_injection/test_database_interruptions.py](../tests/failure_injection/test_database_interruptions.py) (`test_restore_maintenance_blocks_claims_and_admission_but_allows_safe_lookup`) |
+| Tidak ada jaminan RPO/RTO produksi, deteksi restore otomatis, PITR/HA/multi-region failover atau sertifikasi korupsi disk. Intent yang hilang setelah snapshot tetap berbahaya; maintenance mode dan review jendela kehilangan eksternal wajib sebelum dispatch dilanjutkan. | unverified | Klaim negatif; drill hanya pada database sekali pakai, lihat [docs/backup-restore.md](backup-restore.md). |
+| Counter proses di-reset dan harus di-scrape dari setiap proses; gauge DB terduplikasi antar replika API dan tidak boleh dijumlahkan. | unverified | Tidak ada test multi-proses; metrik per-tenant diuji di [tests/security/test_tenants.py](../tests/security/test_tenants.py) (`test_tenant_header_cannot_override_bound_key_and_metrics_are_scoped`). |
+| Tidak ada collector terdeploy, dashboard SLO, alert rule atau tracing OpenTelemetry end-to-end. | unverified | Klaim negatif; lihat [docs/observability.md](observability.md). |
+| Kapasitas antrean dan kuota admission memakai state PostgreSQL bersama. | verified | [tests/concurrency/test_admission_bounds.py](../tests/concurrency/test_admission_bounds.py) |
+| Scheduling tidak punya fairness antar tenant, priority queue, sharding atau kuota provider tingkat akun. Rekonsiliasi dan work masing-masing mengambil satu item per siklus polling. | unverified | Klaim negatif; tidak ada test. |
+| Kuota ingress terdistribusi untuk semua rute, pertahanan slow-client, TLS, kebijakan egress/DNS-rebinding dan secret produksi tetap pekerjaan deployment. | unverified | Klaim negatif; tidak ada test. |
+| SIGTERM menghentikan claim baru dan mengizinkan drain terbatas; lewat deadline atau SIGKILL, intent disimpan untuk recovery. | verified | [tests/failure_injection/test_sigterm.py](../tests/failure_injection/test_sigterm.py), [tests/unit/test_draining.py](../tests/unit/test_draining.py), [tests/failure_injection/test_process_death.py](../tests/failure_injection/test_process_death.py) |
+| Lease tidak punya heartbeat, dan deadline tidak bisa membatalkan efek remote yang sudah diterima. | unverified | Klaim negatif; tidak ada test. |
+| Job poison pra-dispatch dikarantina sebagai FAILED_PERMANENT dengan kode eksplisit; penulisan yang tidak pasti tetap di rekonsiliasi. | verified | [tests/failure_injection/test_reconciliation_lifecycle.py](../tests/failure_injection/test_reconciliation_lifecycle.py) (`test_poison_model_job_is_quarantined_and_next_execution_progresses`, `test_unexpected_exception_after_side_effect_stays_ambiguous`) |
+| Tidak ada replay otomatis job poison atau layanan DLQ eksternal; penolakan bisnis vs bug program masih butuh diagnosa manusia. | unverified | Klaim negatif; tidak ada test. |
+| Upgrade v1 ke v2 pada data terisi dan downgrade yang dijaga diuji pada database sintetis. | verified | [tests/integration/test_migration_compatibility.py](../tests/integration/test_migration_compatibility.py) |
+| Deployment campuran versi bergulir pada pelanggan tidak tersertifikasi; worker lama harus di-drain dulu. | unverified | Tidak ada test mixed-version. |
+| Budget token memblokir dispatch tool saat terlampaui. | verified | [tests/integration/test_runtime.py](../tests/integration/test_runtime.py) (`test_token_budget_blocks_tool_dispatch`) |
+| Token yang dilaporkan bisa hilang setelah panggilan berbayar; budget token bukan batas belanja yang tepat. | unverified | Tidak ada test untuk kehilangan laporan token. |
+| Benchmark admission tidak mencakup latensi TCP/TLS/model/tool dan bukan kapasitas produksi. | unverified | [benchmarks/admission.py](../benchmarks/admission.py) hanya mengukur admission; lihat [docs/benchmark-methodology.md](benchmark-methodology.md). |
+| Ingress adalah token bucket satu proses; request tanpa bearer yang cocok role paling banyak memakai 25% budget bersama dalam satu burst, dan /ready memakai budget sementara /health bebas. | verified | [tests/security/test_boundaries.py](../tests/security/test_boundaries.py) (`test_ingress_rate_limit`, `test_invalid_bearer_flood_cannot_exhaust_reserved_api_capacity`, `test_ready_requires_ingress_budget_but_health_remains_unlimited`) |
+| Webhook bertanda tangan diperlakukan konservatif sebagai untrusted di gerbang ingress pra-body, jadi pengiriman webhook tetap butuh gateway upstream dengan kontrol ingress/fairness dan penanganan retry. Ini bukan pertahanan DDoS terdistribusi. | unverified | Tidak ada test untuk perilaku gateway upstream atau DDoS terdistribusi. |
