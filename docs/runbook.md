@@ -48,6 +48,82 @@ business key is a new external action, not recovery. If a GitHub response times 
 its marker in the bound repository and trusted actor history; edited/missing/duplicate
 results remain unresolved. A changed repository/actor invalidates pending authority/lookup.
 
+## Stuck worker
+
+Use this when executions stay in `CREATED`, `RETRY_PENDING`, `RUNNING` or `TOOL_EXECUTING`
+long after their due time or lease expiry. Run every command from the repository root. Do not
+paste tokens into tickets; `$API_KEY` below is the tenant API credential from your own `.env`.
+
+1. Is the worker process alive and healthy?
+
+   ```bash
+   docker compose ps worker
+   docker compose logs --tail 100 worker
+   ```
+
+   Look for a restart loop, an exit code, or repeated `worker_error` log lines. An
+   `error_class` of `database_unavailable` points at the database, not at the worker: fix
+   connectivity first (see Triage, first row).
+
+2. Is it claiming turns? The worker metrics port is `RUNTIME_WORKER_METRICS_PORT` (9101 in
+   `docker-compose.yml`) and listens on 127.0.0.1 inside the container only. Read it twice,
+   a few seconds apart:
+
+   ```bash
+   docker compose exec worker python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:9101/').read().decode())" | grep runtime_advances_total
+   ```
+
+   A counter that does not move while `CREATED` or `RETRY_PENDING` rows exist means the loop is
+   not claiming work. A counter that moves means the worker is fine and the problem is a
+   single execution (step 4).
+
+3. How many executions are in each state for the tenant?
+
+   ```bash
+   curl -s -H "Authorization: Bearer $API_KEY" http://127.0.0.1:8000/metrics | grep runtime_executions
+   ```
+
+   Growth in `CREATED`/`RETRY_PENDING` with no movement confirms a stall. A pile of
+   `RUNNING`/`TOOL_EXECUTING` means leases are held by a dead or hung owner.
+
+4. Inspect one affected execution and its events before touching anything:
+
+   ```bash
+   curl -s -H "Authorization: Bearer $API_KEY" http://127.0.0.1:8000/executions/$EXECUTION_ID
+   curl -s -H "Authorization: Bearer $API_KEY" "http://127.0.0.1:8000/executions/$EXECUTION_ID/events?limit=50"
+   ```
+
+   Check `state`, `next_attempt_at` and the last event kind. If the last event is a dispatch
+   intent with no result, the outcome of that external call is unknown: do not retry it by hand.
+
+5. Repair stale leases without dispatching anything new:
+
+   ```bash
+   docker compose exec worker python -m app.worker --recover-only
+   ```
+
+   This runs `recover()` once and exits. For an expired `RUNNING`/`TOOL_EXECUTING` row it
+   schedules a retry if the pending call was a read or model call and the retry budget and
+   deadline allow, fails it with `recovery_budget_exhausted` otherwise, and moves an
+   uncertain write to `RECONCILIATION_REQUIRED` with `lease_expired_after_dispatch`. It never
+   replays a write. Rows whose lease has not expired are left alone, so a healthy slow turn
+   is not stolen.
+
+6. Restart the worker only if step 1 or 2 showed it is not claiming work:
+
+   ```bash
+   docker compose restart worker
+   ```
+
+   Compose gives it 35 seconds to drain (`RUNTIME_WORKER_DRAIN_SECONDS` defaults to 30); work
+   cut off after that is picked up through lease recovery, not lost. Then repeat step 2.
+
+7. Stop and escalate if: executions sit in `RECONCILIATION_REQUIRED` or `MANUAL_REVIEW` (use
+   the operator path in the Triage table, not a restart), `RUNTIME_RECOVERY_READ_ONLY=true`
+   is set (the worker recovers and reconciles but does not advance, by design), or the same
+   execution returns to a stalled state after recovery. Keep the execution ID, event history
+   and `worker_error` lines as evidence.
+
 ## Interruption and recovery
 
 After database unavailability, reconnect and inspect durable intent. Do not infer success
